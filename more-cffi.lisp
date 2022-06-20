@@ -3,6 +3,25 @@
 (in-package :mcffi)
 
 
+;; Defines a with macro named name, using a constructor and a destructor
+;; The constructor can receive zero or more arguments and can return one or more values
+;; The destructor must receive 'destructor-arity' arguments. These arguments are the first values the
+;; constructor returns
+;; The resulting macro binds some vars to the results from the constructor. These vars can be fewer than the returned values
+(defmacro defwith (name create destroy &key (destructor-arity 1))
+  (with-gensyms ((var "var") (var-list "var-list") (args "args") (ret-list "ret-list") (body "body"))
+    `(defmacro ,name (,var ,args &body ,body)
+       (with-gensyms ((,ret-list "ret-list"))
+         (let ((,var-list (if (listp ,var)
+                              ,var
+                              (list ,var))))
+           `(let ((,,ret-list (multiple-value-list (,',create ,@,args))))
+              (unwind-protect
+                (multiple-value-bind ,,var-list (values-list ,,ret-list)
+                  ,@,body)
+                (apply #',',destroy (subseq ,,ret-list 0 ,',destructor-arity)))))))))
+
+
 ;; Returns the list of symbols from slot-names that appear in expr
 (defun find-slot-names (slot-names expr)
   (flet ((find-slot-names-aux (names l names-found)
