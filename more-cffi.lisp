@@ -13,7 +13,7 @@
 ;; The destructor must receive 'destructor-arity' arguments. These arguments are the first values the
 ;; constructor returns
 ;; The resulting macro binds some vars to the results from the constructor. These vars can be fewer than the returned values
-(defmacro defwith (name create destroy &key (destructor-arity 1))
+(defmacro defwith (name create destroy &key (destructor-arity 1) (destructor-arguments nil))
   (with-gensyms ((var "var") (var-list "var-list") (args "args") (ret-list "ret-list") (body "body"))
     `(defmacro ,name (,var ,args &body ,body)
        (with-gensyms ((,ret-list "ret-list"))
@@ -24,7 +24,10 @@
               (unwind-protect
                 (multiple-value-bind ,,var-list (values-list ,,ret-list)
                   ,@,body)
-                (apply #',',destroy (subseq ,,ret-list 0 ,',destructor-arity)))))))))
+                (apply #',',destroy ,,(if destructor-arguments
+					  ``(loop for index in ',',destructor-arguments
+						  collect (nth index ,,ret-list))
+					  ``(subseq ,,ret-list 0 ,',destructor-arity))))))))))
 
 
 ;; Returns the list of symbols from slot-names that appear in expr
@@ -75,18 +78,20 @@
                (cffi:with-foreign-slots (,used-getter-slots ,arg ,type)
 	         ,(if (null getter)
 	              slot
-	              (cadr getter)))))
+	              `(progn
+			 ,@(cdr getter))))))
        ,(if (or (not setter-p) (not (null setter)))
 	    `(defun (setf ,getter-name) ,setter-args
 	       (cffi:with-foreign-slots (,used-setter-slots ,arg ,type)
 	         ,(if (null setter)
 		      `(setf ,slot ,new-value-arg)
-		      (cadr setter))))))))
+		      `(progn
+			,@(cdr setter)))))))))
 
 
 ;; Defines a bunch of foreign getters and setters.
 ;; Each expression in slot-accessors is a symbol denoting a slot member or a list
-;; (slot :getter (getter-expression nil) :setter (setter-expression nil))
+;; (slot :getter getter-expression :setter setter-expression)
 ;; The getter-expressions and setter expressions are explained in the above macro (def-foreign-slot-accessors)
 ;; If no getter-expr or setter-expr are provided, then the correspondly function is not defined.
 (defmacro def-foreign-accessors (prefix type &rest slot-accessors)
