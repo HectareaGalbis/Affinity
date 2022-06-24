@@ -175,8 +175,10 @@
 			    (setf ,@(apply #'append (mapcar #'list used-slots c-slots))))
 			  (values ,struct-object)))
 		      (defun ,destructor-name (,struct-object)
-			(cffi:with-foreign-slots (,destructor-used-slots ,struct-object ,type)
-			  ,@destructor-expressions)
+			,@(if destructor-used-slots
+			      `((cffi:with-foreign-slots (,destructor-used-slots ,struct-object ,type)
+				  ,@destructor-expressions))
+			      nil)
 			(cffi:foreign-free ,struct-object))
 		      (defwith ,name-with
 			,constructor-name
