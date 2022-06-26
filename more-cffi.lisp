@@ -30,6 +30,13 @@
 					  ``(subseq ,,ret-list 0 ,',destructor-arity))))))))))
 
 
+(defun remove-property (keyword l)
+  (cond
+    ((null l)             nil)
+    ((eq (car l) keyword) (cddr l))
+    (t                    (cons (car l) (remove-property keyword (cdr l))))))
+
+
 ;; Returns the list of symbols from slot-names that appear in expr
 (defun find-slot-names (slot-names expr)
   (labels ((find-slot-names-aux (names l names-found)
@@ -61,13 +68,68 @@
 ;; list with a new-value parameter and additional parameters if needed. The latter must
 ;; be an expression using this parameters and the slots from the structure. This expression
 ;; should specialize the slot assignment.
-(defmacro def-foreign-slot-accessors (getter-name slot type
-				      &key (slot-names nil) (getter nil getter-p) (setter nil setter-p))
+(defun check-acc-prefix (prefix)
+  (unless (symbolp prefix)
+    (error "Expected a symbol.~%Found:~%   ~S" prefix)))
+
+(defun check-acc-type (type)
+  (unless (and (listp type)
+	       (eq (car type) :struct)
+	       (symbolp (cadr type)))
+    (error "Expected a list (:struct type) where type is a cffi type.~%Found:~%   ~S" type)))
+
+(defun check-acc-slot-member (slot-member slot-names struct-type)
+  (unless (member slot-member slot-names)
+    (error "Expected a slot member from ~S~%Found:~%   ~S" struct-type slot-member)))
+
+(defun check-acc-getter (getter accessor)
+  (unless (or (null getter)
+	      (and (listp getter)
+		   (listp (car getter))
+		   (not (null (cadr getter)))))
+    (error "Expected a getter expression ((&rest args) expr) in ~S~%Found:~%   ~S" accessor getter)))
+
+(defun check-acc-setter (setter accessor)
+  (unless (or (null setter)
+	      (and (listp setter)
+		   (listp (car setter))
+		   (not (null (cadr setter)))
+		   (not (member (caar setter) '(&optional &key &rest &aux &allow-other-keys)))))
+    (error "Expected a setter expression ((new-val &rest args) expr) in ~S~%Found:~%   ~S" accessor setter)))
+
+(defun check-acc-slot-accessor (accessor slot-names struct-type)
+  (if (and (listp accessor) (not (null accessor)))
+      (progn
+	(check-acc-slot-member (car accessor) slot-names struct-type)
+	(if (not (null (cdr accessor)))
+	    (iter (for rest-accessor on (cdr accessor) by (lambda (x) (cdr (cdr x))))
+		  (unless (member (car rest-accessor) '(:pointer :getter :setter))
+		    (error "Expected :pointer, :getter or :setter in:~%   ~S~%Found:~%   ~S"
+			   accessor (car rest-accessor)))
+		  (if (eq (car rest-accessor) :getter)
+		      (check-acc-getter (cadr rest-accessor) accessor))
+		  (if (eq (car rest-accessor) :setter)
+		      (check-acc-setter (cadr rest-accessor) accessor)))))))
+
+(defun check-acc-slot-accessors (accessors slot-names struct-type)
+  (loop for accessor in accessors
+	do (check-acc-slot-accessor accessor slot-names struct-type)))
+
+(defmacro def-foreign-slot-accessors (getter-name slot type slot-names slot-pointers
+				      &key (getter nil getter-p) (setter nil setter-p))
   (let* ((arg (gensym))
 	 (slot-names-c (or slot-names (cffi:foreign-slot-names type)))
 	 (used-getter-slots (if (null getter) (list slot) (find-slot-names slot-names-c (cadr getter))))
+	 (ptr-used-getter-slots (mapcar (lambda (x) (if (member x slot-pointers)
+							(list :pointer x)
+							x))
+					used-getter-slots))
 	 (getter-args (if (null getter) (list arg) `(,arg ,@(car getter))))
 	 (used-setter-slots (if (null setter) (list slot) (find-slot-names slot-names-c (cadr setter))))
+	 (ptr-used-setter-slots (mapcar (lambda (x) (if (member x slot-pointers)
+							(list :pointer x)
+							x))
+					used-setter-slots))
 	 (new-value-arg (if (null setter) (gensym "new-value")))
 	 (setter-args (if (null setter) (list new-value-arg arg) (if (null (car setter))
 								     (error "At least one parameter is needed")
@@ -75,14 +137,14 @@
     `(progn
        ,(if (or (not getter-p) (not (null getter)))
 	    `(defun ,getter-name ,getter-args
-               (cffi:with-foreign-slots (,used-getter-slots ,arg ,type)
+               (cffi:with-foreign-slots (,ptr-used-getter-slots ,arg ,type)
 	         ,(if (null getter)
 	              slot
 	              `(progn
 			 ,@(cdr getter))))))
        ,(if (or (not setter-p) (not (null setter)))
 	    `(defun (setf ,getter-name) ,setter-args
-	       (cffi:with-foreign-slots (,used-setter-slots ,arg ,type)
+	       (cffi:with-foreign-slots (,ptr-used-setter-slots ,arg ,type)
 	         ,(if (null setter)
 		      `(setf ,slot ,new-value-arg)
 		      `(progn
@@ -95,21 +157,30 @@
 ;; The getter-expressions and setter expressions are explained in the above macro (def-foreign-slot-accessors)
 ;; If no getter-expr or setter-expr are provided, then the correspondly function is not defined.
 (defmacro def-foreign-accessors (prefix type &body slot-accessors)
-  (let ((slot-names (cffi:foreign-slot-names type)))
+  (check-acc-prefix prefix)
+  (check-acc-type type)
+  (check-acc-slot-accessors slot-accessors (cffi:foreign-slot-names type) type)
+  (let ((slot-names (cffi:foreign-slot-names type))
+	(slot-pointers (loop for slot-accessor in slot-accessors
+			     if (and (not (symbolp slot-accessor))
+				     (cadr (member :pointer slot-accessor)))
+			       collect (car slot-accessor))))
     `(progn ,@(loop for slot-accessor in slot-accessors
 		    collect (if (symbolp slot-accessor)
 			        `(def-foreign-slot-accessors
 				   ,(intern (concatenate 'string (string prefix) "-" (string slot-accessor)))
 				   ,slot-accessor
 				   ,type
-				   :slot-names ,slot-names)
+				   ,slot-names
+				   ,slot-pointers)
 			        `(def-foreign-slot-accessors
 				   ,(intern (concatenate 'string (string prefix) "-"
 							 (string (first slot-accessor))))
 				   ,(first slot-accessor)
 				   ,type
-				   :slot-names ,slot-names
-				   ,@(cdr slot-accessor)))))))
+				   ,slot-names
+				   ,slot-pointers
+				   ,@(remove-property :pointer (cdr slot-accessor))))))))
 
 
 ;; Defines a constructor, a destructor and a with macro for some struct type.
