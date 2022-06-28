@@ -3,10 +3,51 @@
 (in-package :mcffi)
 
 
+;; ----------------------------
+;; ----- Helper functions -----
+;; ----------------------------
+
 ;; memset from C standard library (parece ser que puede dar problemas, mejor usar zero-struct)
 (cffi:defcfun "memset" :pointer
   (str :pointer) (c :int) (n :size))
 
+(defun remove-property (keyword l)
+  (cond
+    ((null l)             nil)
+    ((eq (car l) keyword) (cddr l))
+    (t                    (cons (car l) (remove-property keyword (cdr l))))))
+
+
+;; Returns the list of symbols from slot-names that appear in expr
+(defun find-slot-names (slot-names expr)
+  (labels ((find-slot-names-aux (names l names-found)
+	         (cond
+                   ((and (symbolp l) (member l names)) (adjoin l names-found))
+                   ((consp l) (find-slot-names-aux names (cdr l)
+						   (find-slot-names-aux names (car l) names-found)))
+                   (t names-found))))
+    (find-slot-names-aux slot-names expr nil)))
+
+
+;; Recursively search for val in l
+(defun member-rec (syms l)
+  (if (consp l)
+    (or (member-rec syms (car l)) (member-rec syms (cdr l)))
+    (member l syms)))
+
+
+;; Substitute every ocurrence of each symbol in assoc-symbol by
+;; its associated symbol
+(defun rec-substitute (assoc-symbols l)
+  (cond
+    ((and (symbolp l) (member l assoc-symbols)) (getf assoc-symbols l))
+    ((consp l) (cons (rec-substitute assoc-symbols (car l)) (rec-substitute assoc-symbols (cdr l))))
+    (t l)))
+
+
+;; -------------------
+;; ----- defwith -----
+;; -------------------
 
 ;; Defines a with macro named name, using a constructor and a destructor
 ;; The constructor can receive zero or more arguments and can return one or more values
@@ -30,258 +71,289 @@
 					  ``(subseq ,,ret-list 0 ,',destructor-arity))))))))))
 
 
-(defun remove-property (keyword l)
-  (cond
-    ((null l)             nil)
-    ((eq (car l) keyword) (cddr l))
-    (t                    (cons (car l) (remove-property keyword (cdr l))))))
+;; ----------------------------------------
+;; ----- def-foreign-struct-functions -----
+;; ----------------------------------------
 
+(defun check-infix (infix)
+  (unless (symbolp infix)
+    (error "Expected a symbol.~%Found:~%   ~S" suffix)))
 
-;; Returns the list of symbols from slot-names that appear in expr
-(defun find-slot-names (slot-names expr)
-  (labels ((find-slot-names-aux (names l names-found)
-	         (cond
-                   ((and (symbolp l) (member l names)) (adjoin l names-found))
-                   ((consp l) (find-slot-names-aux names (cdr l)
-						   (find-slot-names-aux names (car l) names-found)))
-                   (t names-found))))
-    (find-slot-names-aux slot-names expr nil)))
-
-
-;; Substitute every ocurrence of each symbol in assoc-symbol by
-;; its associated symbol
-(defun rec-substitute (l assoc-symbols)
-  (cond
-    ((and (symbolp l) (member l assoc-symbols)) (getf assoc-symbols l))
-    ((consp l) (cons (rec-substitute (car l) assoc-symbols) (rec-substitute (cdr l) assoc-symbols)))
-    (t l)))
-
-
-;; Defines a getter and a setter for a foreign struct slot
-;; If no getter provided, the returned value is the slot value itself
-;; If no setter provided, the stored value is the value passed to setf
-;; If getter is provided, this must be a list of two elements. The former must be
-;; another list with additional parameters that the getter will receive. The latter
-;; must be an expression using the additional paramaters and the slots from the structure.
-;; The resulting value from evaluating that expression is returned.
-;; If setter is provided, this must be a list of two elements. The former must be another
-;; list with a new-value parameter and additional parameters if needed. The latter must
-;; be an expression using this parameters and the slots from the structure. This expression
-;; should specialize the slot assignment.
-(defun check-acc-prefix (prefix)
-  (unless (symbolp prefix)
-    (error "Expected a symbol.~%Found:~%   ~S" prefix)))
-
-(defun check-acc-type (type)
+(defun check-struct-type (type)
   (unless (and (listp type)
 	       (eq (car type) :struct)
 	       (symbolp (cadr type)))
     (error "Expected a list (:struct type) where type is a cffi type.~%Found:~%   ~S" type)))
 
-(defun check-acc-slot-member (slot-member slot-names struct-type)
-  (unless (member slot-member slot-names)
-    (error "Expected a slot member from ~S~%Found:~%   ~S" struct-type slot-member)))
+(defun check-options (options)
+  (unless (listp options)
+    (error "Expected a list.~%Found:~%   ~S" options))
+  (iter (for option in options)
+    (unless (member option '(:no-constructor :no-destructor :enable-default-get
+			     :enable-default-set :enable-default-create :include-invisibles))
+      (error "Expected :no-constructor, :no-destructor, :enable-default-get, :enable-default-set, :enable-default-create or :include-invisibles.~%Found:~%   ~S" option))))
 
-(defun check-acc-getter (getter accessor)
+(defun get-init-arg-parameter (init-arg)
+  (if (symbolp init-arg)
+      init-arg
+      (if (null init-arg)
+	  nil
+	  (if (symbolp (car init-arg))
+	      (car init-arg)
+	      (cadar init-arg)))))
+
+(defun create-constructor-parameter (init-arg)
+  (let ((key-arg (intern (string (get-init-arg-parameter init-arg)) "KEYWORD")))
+    (if (symbolp init-arg)
+	(list key-arg init-arg)
+	(if (null init-arg)
+	    nil
+	    (if (symbolp (car init-arg))
+		(list (list key-arg (car init-arg)) (cadr init-arg))
+		init-arg)))))
+
+(defun check-init-arg (init-arg)
+  (unless (or (symbolp init-arg) (listp init-arg))
+    (error "Expected a symbol or a list.~%Found:~%   ~S" init-arg))
+  (when (listp init-arg)
+    (unless (<= (length init-arg) 3)
+      (error "Expected a list of less than three elements.~%Found:~%   ~S" init-arg))
+    (when (not (null init-arg))
+      (unless (or (symbolp (car init-arg)) (listp (car init-arg)))
+	(error "Expected a symbol or a list.~%Found:   ~S" (car init-arg)))
+      (when (listp (car init-arg))
+	(unless (keywordp (caar init-arg))
+	  (error "Expected a keyword.~%Found:~%   ~S" (caar init-arg)))
+	(unless (symbolp (cadar init-arg))
+	  (error "Expected a symbol.~%Found:~%   ~S" (cadar init-arg))))
+      (when (not (null (caddr init-arg)))
+	(unless (symbolp (caddr init-arg))
+	  (error "Expected a symbol.~%Found:~%   ~S" (caddr init-arg)))))))
+
+(defun check-create-expr (create init-parameters)
+  (unless (member-rec init-parameters create)
+    (error "Expected the use of at least one constructor parameter.~%Found:~%   ~S" create)))
+
+(defun check-creates (creates)
+  (let ((init-parameters (iter (for create in creates)
+			       (check-init-arg (car create))
+			       (let ((init-parameter (get-init-arg-parameter (car create))))
+				 (if init-parameter
+				     (collect init-parameter))))))
+    (loop for create in creates
+	  do (check-create-expr create init-parameters))))
+
+(defun check-destroy (destroy slots)
+  (unless (member-rec slots destroy)
+    (error "Expected the use of at least one slot member.~%Found:~%   ~S" destroy)))
+
+(defun check-get (getter slot)
   (unless (or (null getter)
 	      (and (listp getter)
 		   (listp (car getter))
 		   (not (null (cadr getter)))))
-    (error "Expected a getter expression ((&rest args) expr) in ~S~%Found:~%   ~S" accessor getter)))
+    (error "Expected a getter expression ((&rest args) expr) in the ~S descriptor.~%Found:~%   ~S"
+	   slot getter)))
 
-(defun check-acc-setter (setter accessor)
+(defun check-set (setter slot)
   (unless (or (null setter)
 	      (and (listp setter)
 		   (listp (car setter))
 		   (not (null (cadr setter)))
 		   (not (member (caar setter) '(&optional &key &rest &aux &allow-other-keys)))))
-    (error "Expected a setter expression ((new-val &rest args) expr) in ~S~%Found:~%   ~S" accessor setter)))
-
-(defun check-acc-slot-accessor (accessor slot-names struct-type)
-  (if (and (listp accessor) (not (null accessor)))
-      (progn
-	(check-acc-slot-member (car accessor) slot-names struct-type)
-	(if (not (null (cdr accessor)))
-	    (iter (for rest-accessor on (cdr accessor) by (lambda (x) (cdr (cdr x))))
-		  (unless (member (car rest-accessor) '(:pointer :getter :setter))
-		    (error "Expected :pointer, :getter or :setter in:~%   ~S~%Found:~%   ~S"
-			   accessor (car rest-accessor)))
-		  (if (eq (car rest-accessor) :getter)
-		      (check-acc-getter (cadr rest-accessor) accessor))
-		  (if (eq (car rest-accessor) :setter)
-		      (check-acc-setter (cadr rest-accessor) accessor)))))))
-
-(defun check-acc-slot-accessors (accessors slot-names struct-type)
-  (loop for accessor in accessors
-	do (check-acc-slot-accessor accessor slot-names struct-type)))
-
-(defmacro def-foreign-slot-accessors (getter-name slot type slot-names slot-pointers
-				      &key (getter nil getter-p) (setter nil setter-p))
-  (let* ((arg (gensym))
-	 (slot-names-c (or slot-names (cffi:foreign-slot-names type)))
-	 (used-getter-slots (if (null getter) (list slot) (find-slot-names slot-names-c (cadr getter))))
-	 (ptr-used-getter-slots (mapcar (lambda (x) (if (member x slot-pointers)
-							(list :pointer x)
-							x))
-					used-getter-slots))
-	 (getter-args (if (null getter) (list arg) `(,arg ,@(car getter))))
-	 (used-setter-slots (if (null setter) (list slot) (find-slot-names slot-names-c (cadr setter))))
-	 (ptr-used-setter-slots (mapcar (lambda (x) (if (member x slot-pointers)
-							(list :pointer x)
-							x))
-					used-setter-slots))
-	 (new-value-arg (if (null setter) (gensym "new-value")))
-	 (setter-args (if (null setter) (list new-value-arg arg) (if (null (car setter))
-								     (error "At least one parameter is needed")
-								     `(,(caar setter) ,arg ,@(cdar setter))))))
-    `(progn
-       ,(if (or (not getter-p) (not (null getter)))
-	    `(defun ,getter-name ,getter-args
-               (cffi:with-foreign-slots (,ptr-used-getter-slots ,arg ,type)
-	         ,(if (null getter)
-	              slot
-	              `(progn
-			 ,@(cdr getter))))))
-       ,(if (or (not setter-p) (not (null setter)))
-	    `(defun (setf ,getter-name) ,setter-args
-	       (cffi:with-foreign-slots (,ptr-used-setter-slots ,arg ,type)
-	         ,(if (null setter)
-		      `(setf ,slot ,new-value-arg)
-		      `(progn
-			,@(cdr setter)))))))))
-
-
-;; Defines a bunch of foreign getters and setters.
-;; Each expression in slot-accessors is a symbol denoting a slot member or a list
-;; (slot :getter getter-expression :setter setter-expression)
-;; The getter-expressions and setter expressions are explained in the above macro (def-foreign-slot-accessors)
-;; If no getter-expr or setter-expr are provided, then the correspondly function is not defined.
-(defmacro def-foreign-accessors (prefix type &body slot-accessors)
-  (check-acc-prefix prefix)
-  (check-acc-type type)
-  (check-acc-slot-accessors slot-accessors (cffi:foreign-slot-names type) type)
-  (let ((slot-names (cffi:foreign-slot-names type))
-	(slot-pointers (loop for slot-accessor in slot-accessors
-			     if (and (not (symbolp slot-accessor))
-				     (cadr (member :pointer slot-accessor)))
-			       collect (car slot-accessor))))
-    `(progn ,@(loop for slot-accessor in slot-accessors
-		    collect (if (symbolp slot-accessor)
-			        `(def-foreign-slot-accessors
-				   ,(intern (concatenate 'string (string prefix) "-" (string slot-accessor)))
-				   ,slot-accessor
-				   ,type
-				   ,slot-names
-				   ,slot-pointers)
-			        `(def-foreign-slot-accessors
-				   ,(intern (concatenate 'string (string prefix) "-"
-							 (string (first slot-accessor))))
-				   ,(first slot-accessor)
-				   ,type
-				   ,slot-names
-				   ,slot-pointers
-				   ,@(remove-property :pointer (cdr slot-accessor))))))))
-
-
-;; Defines a constructor, a destructor and a with macro for some struct type.
-;; suffix is the suffix of the constructor, destructor and with macro. The added prefixes are
-;; "create-", "destroy-", and "with-" respectively.
-;; Each slot-descriptor must one of the following options:
-;;  - slot-name: The constructor receives an argument with the keyword ":slot-name".
-;;  - (slot-name): Same as the previous option.
-;;  - ((slot-name init-value)): Same as the previous, but with an initial value init-value.
-;;  - (slot-name constructor-expr): The constructor-expr is a lisp to foreign traslation for the slot
-;;                                  slot-name. You can use all the slot-names used in the macro, but
-;;                                  only that slot-names (The structure may have more slots than the
-;;                                  used in the macro).
-;;  - (slot-name constructor-expr destructor-expr): The destructor-expr should perform some operations
-;;                                                  on the slot to assure that the destructor dealloc correctly
-;;                                                  the structure. This expression can use all the slots from
-;;                                                  the structure.
-(defun check-suffix (suffix)
-  (unless (symbolp suffix)
-      (error "Expected a symbol.~%Found:~%   ~S" suffix)))
-
-(defun check-foreign-type (type)
-  (unless (and (listp type)
-	       (eq (car type) :struct)
-	       (symbolp (cadr type)))
-    (error "Expected a list (:struct type) where type is a cffi type.~%Found:~%   ~S" type)))
+    (error "Expected a setter expression ((new-val &rest args) expr) in the ~S descriptor.~%Found:~%   ~S"
+	   slot setter)))
 
 (defun check-slot-member (slot-member slot-names struct-type)
   (unless (member slot-member slot-names)
     (error "Expected a slot member from ~S~%Found:~%   ~S" struct-type slot-member)))
 
-(defun check-slot-descriptors (slot-descriptors slot-names struct-type)
-  (iter (for slot-descriptor in slot-descriptors)
-    (if (listp slot-descriptor)
-	(progn
-	  (check-slot-member (car slot-descriptor) slot-names struct-type)
-	  (if (not (null (cdr slot-descriptor)))
-	      (iter (for rest-descriptor on (cdr slot-descriptor) by (lambda (x) (cdr (cdr x))))
-		(unless (member (car rest-descriptor) '(:init-form :create :destroy))
-		  (error "Expected :init-form, :create or :destroy in:~%   ~S~%Found:~%   ~S"
-			 slot-descriptor (car rest-descriptor))))))
-	(check-slot-member slot-descriptor slot-names struct-type))))
+(defun check-slot-descriptor (descriptor slot-names struct-type no-constructor-p no-destructor-p)
+  (if (and (listp descriptor) (not (null descriptor)))
+      (progn
+	(check-slot-member (car descriptor) slot-names struct-type)
+	(when (not (null (cdr descriptor)))
+	  (if (and no-constructor-p (member :create descriptor))
+	      (error "While :no-constructor is enabled, :create is forbidden. Found :create in ~S descriptor."
+		     (car descriptor)))
+	  (if (and no-destructor-p (member :destroy descriptor))
+	      (error "While :no-destructor is enabled, :destroy is forbidden. Found :destroy in ~S descriptor."
+		     (car descriptor)))
+	  (iter (for rest-descriptor on (cdr descriptor) by (lambda (x) (cdr (cdr x))))
+		(unless (member (car rest-descriptor) '(:pointer :create :destroy :get :set))
+		  (error "Expected :pointer, :create, :destroy, :get or :set in ~S descriptor.~%Found:~%   ~S"
+			 (car descriptor) (car rest-descriptor)))
+		(if (eq (car rest-descriptor) :destroy)
+		    (check-destroy (cadr rest-descriptor) slot-names))
+		(if (eq (car rest-descriptor) :get)
+		    (check-get (cadr rest-descriptor) (car descriptor)))
+		(if (eq (car rest-descriptor) :set)
+		    (check-set (cadr rest-descriptor) (car descriptor))))))
+      (check-slot-member descriptor slot-names struct-type)))
 
-(defmacro def-foreign-constructor-destructor (suffix type &body slot-descriptors)
-  (check-suffix suffix)
-  (check-foreign-type type)
-  (check-slot-descriptors slot-descriptors (cffi:foreign-slot-names type) type)
-  (let* ((slot-names (cffi:foreign-slot-names type))
-	 (slot-keys  (loop for name in slot-names collect (intern (string name) "KEYWORD")))
-	 (slot-name-keys (apply #'append (mapcar #'list slot-names slot-keys)))
-	 (slot-args  (mapcar (lambda (x) (gensym (string x))) slot-names))
-	 (slot-name-args (apply #'append (mapcar #'list slot-names slot-args)))
-	 (name-with        (intern (concatenate 'string "WITH-" (string suffix))))
-	 (constructor-name (intern (concatenate 'string "CREATE-" (string suffix))))
-	 (destructor-name  (intern (concatenate 'string "DESTROY-" (string suffix)))))
-    (iter (for descriptor in slot-descriptors)
-      (if (symbolp descriptor)
-	  (progn
-	    (collect (list (list (getf slot-name-keys descriptor)
-				 (getf slot-name-args descriptor))
-			   0)
-	      into constructor-args)
-	    (collect descriptor into constructor-used-slots)
-	    (collect (getf slot-name-args descriptor) into final-args))
-	  (let ((init-form (member :init-form descriptor))
-		(create    (member :create descriptor))
-		(destroy   (member :destroy descriptor)))
-	    (collect (list (list (getf slot-name-keys (car descriptor))
-				 (getf slot-name-args (car descriptor)))
-			   (if init-form
-			       (cadr init-form)
-			       nil))
-	      into constructor-args)
-	    (if (cadr create)
-		(let ((final-arg (gensym)))
-		  (collect (list final-arg (rec-substitute (cadr create) slot-name-args))
-		    into let-bindings)
-		  (collect final-arg into final-args))
-		(collect (getf slot-name-args (car descriptor)) into final-args))
-	    (collect (car descriptor) into constructor-used-slots)
-	    (if (cadr destroy)
-		(progn
-		  (unioning (find-slot-names slot-names (cadr destroy)) into destructor-used-slots)
-		  (collect (cadr destroy) into destructor-expressions)))))
-      (finally (let ((struct-object (gensym)))
-		 (return
-		   `(progn
-		      (defun ,constructor-name (&key ,@constructor-args)
-			(let (,@let-bindings
-			      (,struct-object (cffi:foreign-alloc ',type)))
-			  (memset ,struct-object 0 (cffi:foreign-type-size ',type))
-			  (cffi:with-foreign-slots (,constructor-used-slots ,struct-object ,type)
-			    (setf ,@(apply #'append (mapcar #'list constructor-used-slots final-args))))
-			  (values ,struct-object)))
-		      (defun ,destructor-name (,struct-object)
-			,@(if destructor-used-slots
-			      `((cffi:with-foreign-slots (,destructor-used-slots ,struct-object ,type)
-				  ,@destructor-expressions))
-			      nil)
-			(cffi:foreign-free ,struct-object))
-		      (defwith ,name-with
-			,constructor-name
-			,destructor-name))))))))
 
+(defun check-slot-descriptors (descriptors slot-names struct-type no-constructor-p no-destructor-p)
+  (unless (listp descriptors)
+    (error "Expected a list of slot descriptors.~%Found:~%   ~S" descriptors))
+  (iter (for descriptor in descriptors)
+    (check-slot-descriptor descriptor slot-names struct-type no-constructor-p no-destructor-p)
+    (if (listp descriptor)
+	(let ((create-expr-p (member :create descriptor)))
+	  (if create-expr-p
+	      (collect (cadr create-expr-p) into creates))))
+    (finally (if (not no-constructor-p)
+		 (check-creates creates)))))
+
+(defun create-constructor-code (create-infos pointer-slots struct-type enable-default-creates
+				enable-invisibles suffix)
+  (iter (for create-info in create-infos)
+    (destructuring-bind (slot-name invisiblep create createp) create-info
+      (when (and (or enable-invisibles (not invisiblep))
+		 (or enable-default-creates createp))
+	(if (member slot-name pointer-slots)
+	    (collect (list :pointer slot-name) into used-slots)
+	    (collect slot-name into used-slots))
+	(if createp
+	    (progn
+	      (when (not (null (car create)))
+		(collect (create-constructor-parameter (car create)) into constructor-parameters)
+		(let ((new-sym (gensym)))
+		  (collect new-sym into constructor-syms)
+		  (appending (list (get-init-arg-parameter (car create)) new-sym)
+			     into constructor-parameter-syms)))
+	      (let ((new-sym (gensym)))
+		(collect new-sym into let-syms)
+		(collect new-sym into setf-syms))
+	      (collect (cons 'progn (cdr create)) into let-exprs))
+	    (progn
+	      (collect (list (list (intern (string slot-name) "KEYWORD") slot-name) 0)
+		into constructor-parameters)
+	      (let ((new-sym (gensym)))
+		(appending (list slot-name new-sym) into constructor-parameter-syms)
+		(collect new-sym into setf-syms))))))
+    (finally (return `(defun ,(intern (concatenate 'string "CREATE-" (string suffix)))
+			  (&key ,@(rec-substitute constructor-parameter-syms constructor-parameters))
+			,(let ((object-sym (gensym)))
+			   `(let* (,@(mapcar #'list let-syms (rec-substitute constructor-parameter-syms
+									     let-exprs))
+				   (,object-sym (cffi:foreign-alloc ',struct-type)))
+			      (memset ,object-sym 0 (cffi:foreign-type-size ',struct-type))
+			      (cffi:with-foreign-slots (,used-slots ,object-sym ,struct-type)
+				(setf ,@(apply #'append (mapcar #'list used-slots setf-syms))))
+			      (values ,object-sym))))))))
+
+(defun create-destructor-code (destroy-infos pointer-slots struct-type suffix)
+  (let ((slot-names (cffi:foreign-slot-names struct-type)))
+    (iter (for destroy-info in destroy-infos)
+      (destructuring-bind (slot-name invisiblep destroy destroyp) destroy-info
+	(declare (ignore slot-name invisiblep))
+	(when destroyp
+	  (collect destroy into destroy-exprs)
+	  (unioning (find-slot-names slot-names destroy) into used-slots)))
+      (finally (return (let ((arg (gensym))
+			     (final-used-slots (mapcar (lambda (x) (if (member x pointer-slots)
+								       (list :pointer x)
+								       x))
+						       used-slots)))
+			 `(defun ,(intern (concatenate 'string "DESTROY-" (string suffix))) (,arg)
+			    (cffi:with-foreign-slots (,final-used-slots ,arg ,struct-type)
+			      ,@destroy-exprs)
+			    (cffi:foreign-free ,arg))))))))
+
+(defun create-with-code (suffix)
+  `(defwith ,(intern (concatenate 'string "WITH-" (string suffix)))
+       ,(intern (concatenate 'string "CREATE-" (string suffix)))
+     ,(intern (concatenate 'string "DESTROY-" (string suffix)))))
+
+(defun create-get-codes (get-infos pointer-slots struct-type enable-default-get enable-invisibles prefix)
+  (let ((slot-names (cffi:foreign-slot-names struct-type)))
+    (iter (for get-info in get-infos)
+      (destructuring-bind (slot-name invisiblep get-expr get-expr-p) get-info
+	(when (and (or enable-invisibles (not invisiblep))
+		   (or get-expr (and enable-default-get (not get-expr-p))))
+	  (let* ((object-arg (gensym))
+		 (args (cons object-arg (if get-expr (car get-expr) nil)))
+		 (final-get-expr (if get-expr (cons 'progn (cdr get-expr)) slot-name))
+		 (used-slots (find-slot-names slot-names final-get-expr))
+		 (final-used-slots (mapcar (lambda (x) (if (member x pointer-slots)
+							   (list :pointer x)
+							   x))
+					   used-slots)))
+	    (collect `(defun ,(intern (concatenate 'string (string prefix) "-" (string slot-name))) ,args
+			(cffi:with-foreign-slots (,final-used-slots ,(car args) ,struct-type)
+			  ,final-get-expr)))))))))
+
+(defun create-set-codes (set-infos pointer-slots struct-type enable-default-set enable-invisibles prefix)
+  (let ((slot-names (cffi:foreign-slot-names struct-type)))
+    (iter (for set-info in set-infos)
+      (destructuring-bind (slot-name invisiblep set-expr set-expr-p) set-info
+	(when (and (or enable-invisibles (not invisiblep))
+		   (or set-expr (and enable-default-set (not set-expr-p))))
+	  (let* ((object-arg (gensym))
+		 (new-value-arg (if set-expr (caar set-expr) (gensym)))
+		 (args (if set-expr
+			   `(,new-value-arg ,object-arg ,@(cdar set-expr))
+			   `(,new-value-arg ,object-arg)))
+		 (final-set-expr (if set-expr (cons 'progn (cdr set-expr)) `(setf ,slot-name ,new-value-arg)))
+		 (used-slots (find-slot-names slot-names final-set-expr))
+		 (final-used-slots (mapcar (lambda (x) (if (member x pointer-slots)
+							   (list :pointer x)
+							   x))
+					   used-slots)))
+	    (collect `(defun (setf ,(intern (concatenate 'string (string prefix) "-" (string slot-name))))
+			,args
+			(cffi:with-foreign-slots (,final-used-slots ,object-arg ,struct-type)
+			  ,final-set-expr)))))))))
+
+;; Returns a list with four elements.
+;; 1. The slot name of the descriptor.
+;; 2. t if the slot is invisible. Otherwise nil.
+;; 3. If the keyword is used, the expression after it. Otherwise nil.
+;; 4. If the keyword is used, t. Otherwise nil.
+(defun extract-descriptor-info (slot-name descriptor keyword)
+  (cond
+    ((null descriptor) (list slot-name t nil nil))
+    ((symbolp descriptor) (list slot-name nil nil nil))
+    (t (let ((key-expr (member keyword descriptor)))
+	 (list slot-name nil (cadr key-expr) (and key-expr t))))))
+
+(defmacro def-foreign-struct-functions (infix type options &body slot-descriptors)
+  (check-infix infix)
+  (check-struct-type type)
+  (check-options options)
+  (check-slot-descriptors slot-descriptors (cffi:foreign-slot-names type) type
+			  (member :no-constructor options) (member :no-destructor options))
+  (iter (for slot-name in (cffi:foreign-slot-names type))
+    (let ((slot-descriptor (car (member slot-name slot-descriptors :key (lambda (x) (if (listp x)
+											(car x)
+											x))))))
+      (progn
+	(if (and (listp slot-descriptor)
+		 (not (null slot-descriptor))
+		 (cadr (member :pointer slot-descriptor)))
+	    (collect slot-name                                                    into pointer-slots))
+	(if (not (member :no-constructor options))
+	    (collect (extract-descriptor-info slot-name slot-descriptor :create)  into create-infos))
+	(if (not (member :no-destructor options))
+	    (collect (extract-descriptor-info slot-name slot-descriptor :destroy) into destroy-infos))
+	(collect (extract-descriptor-info slot-name slot-descriptor :get)         into get-infos)
+	(collect (extract-descriptor-info slot-name slot-descriptor :set)         into set-infos)))
+    (finally (return `(progn
+			,@(unless (member :no-constructor options)
+			    (list (create-constructor-code create-infos pointer-slots type
+							   (member :enable-default-create options)
+							   (member :include-invisibles options)
+							   infix)))
+			,@(unless (member :no-destructor options)
+			    (list (create-destructor-code destroy-infos pointer-slots type infix)))
+			,@(unless (or (member :no-constructor options)
+				      (member :no-destructor options))
+			    (list (create-with-code infix)))
+			,@(create-get-codes get-infos pointer-slots type
+					    (member :enable-default-get options)
+					    (member :include-invisibles options)
+					    infix)
+			,@(create-set-codes set-infos pointer-slots type
+					    (member :enable-default-set options)
+					    (member :include-invisibles options)
+					    infix))))))
