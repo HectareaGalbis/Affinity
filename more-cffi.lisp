@@ -29,11 +29,21 @@
     (find-slot-names-aux slot-names expr nil)))
 
 
-;; Recursively search for val in l
-(defun member-rec (syms l)
+;; Recursively search for the values from sums in l
+(defun exists-rec (syms l)
   (if (consp l)
-    (or (member-rec syms (car l)) (member-rec syms (cdr l)))
+    (or (exists-rec syms (car l)) (exists-rec syms (cdr l)))
     (member l syms)))
+
+
+;; Mostly like member but recursively
+(defun find-many-rec (sym l)
+  (if (listp l)
+      (if (eq sym (car l))
+	  (list l)
+	  (iter (for elem in l)
+	    (appending (find-many-rec sym elem))))
+    nil))
 
 
 ;; Substitute every ocurrence of each symbol in assoc-symbol by
@@ -71,13 +81,165 @@
 					  ``(subseq ,,ret-list 0 ,',destructor-arity))))))))))
 
 
+;; -------------------------------------------
+;; ----- Documentation default functions -----
+;; -------------------------------------------
+
+(defun doc-header-default (name file)
+  (when *enable-doc-generation*
+    (format file "# ~a~%~%" name)))
+
+(defun doc-subheader-default (name file)
+  (when *enable-doc-generation*
+    (format file "## ~a~%~%" name)))
+
+(defun doc-subsubheader-default (name file)
+  (when *enable-doc-generation*
+    (format file "### ~a~%~%" name)))
+
+(defun doc-note-default (note file)
+  (when *enable-doc-generation*
+    (format file "* **Note**: ~a~%~%" note)))
+
+(defun doc-foreign-function-default (name args type-decls result-decls file)
+  (unless (streamp file)
+    (error "File is not a stream."))
+  (let ((downcase-name (string-downcase (string name)))
+	(downcase-args (string-downcase (apply (lambda (&rest x) (apply #'concatenate 'string x))
+					       (loop for arg in args
+						     collect (format nil " ~a" arg))))))
+    (format file "**~a**~%```lisp~%(~a" downcase-name downcase-name)
+    (when args
+      (format file "~a" downcase-args))
+    (format file ")")
+    (when result-decls
+      (format file " => ")
+      (if (> (length result-decls) 1)
+	  (progn
+	    (format file "(values")
+	    (iter (for type-decl in result-decls)
+	      (format file " ~a" (string-downcase (string (car type-decl)))))
+	    (format file ")"))
+	  (format file "~a" (string-downcase (string (caar result-decls))))))
+    (format file "~%")
+    (format file "```~%~%")
+    (when type-decls
+      (format file "* *Parameters*:~%")
+      (iter (for type-decl in type-decls)
+	(format file "  * *~a*: `~a`~%"
+		(string-downcase (string (car type-decl)))
+		(let ((type (cadr type-decl)))
+		  (if (symbolp type)
+		      (string-downcase (string type))
+		      type)))
+	(finally (format file "~%"))))
+    (when result-decls
+      (format file "* *Return:*~%")
+      (iter (for result-decl in result-decls)
+	(format file "  * *~a*: `~a`~%"
+		(string-downcase (string (car result-decl)))
+		(let ((type (cadr result-decl)))
+		  (if (symbolp type)
+		      (string-downcase (string type))
+		      type)))
+	(finally "~%")))))
+
+
+;; ----------------------------------------
+;; ----- Documentation global options -----
+;; ----------------------------------------
+
+(defparameter *enable-doc-generation* nil)
+
+(defparameter *doc-header-proc* #'doc-header-default)
+(defparameter *doc-subheader-proc* #'doc-subheader-default)
+(defparameter *doc-subsubheader-proc* #'doc-subsubheader-default)
+(defparameter *doc-note-proc* #'doc-note-default)
+(defparameter *doc-foreign-function-proc* #'doc-foreign-function-default)
+
+
+;; -----------------------------------
+;; ----- Documentation functions -----
+;; -----------------------------------
+
+(defun doc-header (name file)
+  (funcall *doc-header-proc* name file))
+
+(defun doc-subheader (name file)
+  (funcall *doc-subheader-proc* name file))
+
+(defun doc-subsubheader (name file)
+  (funcall *doc-subsubheader-proc* name file))
+
+(defun doc-note (name file)
+  (funcall *doc-note-proc* name file))
+
+(defun doc-foreign-function (name args type-decls result-decls file)
+  (funcall *doc-foreign-function-proc* name args type-decls result-decls file))
+
+
+;; --------------------------------
+;; ----- def-foreign-function -----
+;; --------------------------------
+
+(defun check-type-declarations (decl name args)
+  (unless (string= (string (car decl)) "DECLARE-TYPES")
+    (error "Expected a declaration type in ~a.~%Found:~%   ~S" name decl))
+  (iter (for type-decl in (cdr decl))
+    (unless (or (symbolp type-decl) (listp type-decl))
+      (error "Expected a symbol or a list in ~a.~%Found:~%   ~a" name type-decl))
+    (when (symbolp type-decl)
+      (unless (eq type-decl :return)
+	(error "The only available keyword is :return.~%Found: ~a" type-decl))
+      (counting type-decl into return-found))
+    (when (listp type-decl)
+      (unless (>= (length type-decl) 2)
+	(error "The lists must have two or more elements.~%Found in ~a:~%   ~a" name type-decl))
+      (unless (or (symbolp (car type-decl)) (stringp (car type-decl)))
+	(error "Expected a symbol or string at the start of a type declaration in ~a.~%Found:~%   ~a"
+	       name type-decl))
+      (iter (for sym in (cdr type-decl))
+	(unless (symbolp sym)
+	  (error "Expected a symbol in ~a type declaration.~%Found:~%   ~a" name type-decl))
+	(when (= return-found 0)
+	  (unless (exists-rec (list sym) args)
+	    (error "There is no symbol ~a in arguments from ~a." sym name)))))))
+
+
+
+(defun extract-type-declarations (decl)
+  (iter outer (for type-decl in (cdr decl))
+    (until (eq type-decl :return))
+    (iter (for var in (cdr type-decl))
+      (in outer (collect (list var (car type-decl)))))))
+
+(defun extract-return-declarations (decl)
+  (let ((type-decls (cdr (member :return decl))))
+    (iter outer (for type-decl in type-decls)
+      (iter (for var in (cdr type-decl))
+	(in outer (collect (list var (car type-decl))))))))
+
+(defun declare-types (&rest args)
+  (values (extract-type-declarations args) (extract-return-declarations args)))
+
+(defmacro def-foreign-function (name file args &body exprs)
+  (check-type-declarations (car exprs) name args)
+  (let* ((type-declarations (extract-type-declarations (car exprs)))
+	 (return-declarations (extract-return-declarations (car exprs))))
+    `(progn
+       (defun ,name ,args ,@(cdr exprs))
+       ,@(if *enable-doc-generation*
+	     `((doc-foreign-function ',name ',args ',type-declarations ',return-declarations ,file))
+	     nil))))
+
+
 ;; ----------------------------------------
 ;; ----- def-foreign-struct-functions -----
 ;; ----------------------------------------
 
 (defun check-infix (infix)
   (unless (symbolp infix)
-    (error "Expected a symbol.~%Found:~%   ~S" suffix)))
+    (error "Expected a symbol.~%Found:~%   ~S" infix)))
 
 (defun check-struct-type (type)
   (unless (and (listp type)
@@ -131,7 +293,7 @@
 	  (error "Expected a symbol.~%Found:~%   ~S" (caddr init-arg)))))))
 
 (defun check-create-expr (create init-parameters)
-  (unless (member-rec init-parameters create)
+  (unless (exists-rec init-parameters create)
     (error "Expected the use of at least one constructor parameter.~%Found:~%   ~S" create)))
 
 (defun check-creates (creates)
@@ -144,7 +306,7 @@
 	  do (check-create-expr create init-parameters))))
 
 (defun check-destroy (destroy slots)
-  (unless (member-rec slots destroy)
+  (unless (exists-rec slots destroy)
     (error "Expected the use of at least one slot member.~%Found:~%   ~S" destroy)))
 
 (defun check-get (getter slot)
