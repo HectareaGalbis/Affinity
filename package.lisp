@@ -3,13 +3,11 @@
 (defpackage "more-cffi"
   (:use :cl :alexandria :iterate)
   (:nicknames :mcffi)
-  (:export #:defwith
-	   #:*enable-doc-generation*
+  (:export #:*enable-doc-generation*
 	   #:doc-header
 	   #:doc-subheader
 	   #:doc-subsubheader
+	   #:doc-note
+	   #:defwith
 	   #:def-foreign-function
-	   #:def-foreign-struct-functions
-	   ;; #:def-foreign-accessors
-	   ;; #:def-foreign-constructor-destructor
-	   ))
+	   #:def-foreign-struct))
