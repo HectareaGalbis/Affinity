@@ -94,10 +94,12 @@
 (defun doc-foreign-function-default (name args type-decls result-decls file)
   (let* ((name-name (if (symbolp name) (string-downcase (string name)) name))
 	 (arg-names-assoc (iter (for type-decl in type-decls)
-			    (collect (list (if (symbolp (car type-decl))
-					       (car type-decl)
-					       (intern (string-upcase (car type-decl))))
-					   (car type-decl)))))
+			    (appending (list (if (symbolp (car type-decl))
+						 (car type-decl)
+						 (intern (string-upcase (car type-decl))))
+					     (if (stringp (car type-decl))
+						 (car type-decl)
+						 (string-downcase (string (car type-decl))))))))
 	 (arg-names (rec-substitute arg-names-assoc args)))
     (format file "**~a**~%```lisp~%(~a" name-name name-name)
     (when args
@@ -175,11 +177,13 @@
 	(format file "**~a**~%```lisp~%(~a"
 		constructor-name constructor-name)
 	(when constructor-parameters
-	  (format file " &key")
+	  (format file " &key~%")
 	  (iter (for param in constructor-parameters)
 		(destructuring-bind (keyword init-form) param
-		  (let ((keyword-name (if (symbolp keyword) (string-downcase (string keyword)) keyword)))
-		    (format file " (~a ~a)" keyword-name init-form))))
+		  (let ((keyword-name (if (symbolp keyword) (string-downcase (string keyword)) keyword))
+			(num-spaces (+ (length constructor-name) 4)))
+		    (format file (concatenate 'string "~" (write-to-string num-spaces) "T(~a ~a)~%")
+			    keyword-name init-form))))
 	  (format file ")~%```~%~%")))
     (when (not no-destructor-p)
       (format file "**~a**~%```lisp~%(~a obj)~%```~%~%"
@@ -195,8 +199,9 @@
 								      slot-name))))
 		(format file "(~a obj~{ ~a~})" get-name rest-parameters)
 		(if setf-ablep
-		    (format file " ; setf-able~%")))))
-      (format file "~%```~%~%")))))
+		    (format file " ; setf-able"))
+		(format file "~%"))))
+      (format file "```~%~%")))))
 
 
 ;; ----------------------------------------
