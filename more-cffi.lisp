@@ -113,7 +113,7 @@
 	    name-str name-str)
     (format file "Wrap the body expressions with `~a` and `~a`."
 	    create-str destroy-str)
-    (format file " The new object(s) is(are) bound to var.")
+    (format file " The new object(s) is(are) bound to `var`.")
     (format file " The arguments `args` are passed to the constructor.")
     (format file "~%~%")))
 
