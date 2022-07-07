@@ -11,43 +11,36 @@
 (cffi:defcfun "memset" :pointer
   (str :pointer) (c :int) (n :size))
 
-(defun remove-property (keyword l)
-  (cond
-    ((null l)             nil)
-    ((eq (car l) keyword) (cddr l))
-    (t                    (cons (car l) (remove-property keyword (cdr l))))))
 
-
-;; Returns the list of symbols from slot-names that appear in expr
+;; Return the list of symbols from slot-names that appear in expr
 (defun find-slot-names (slot-names expr)
   (labels ((find-slot-names-aux (names l names-found)
-	         (cond
-                   ((and (symbolp l) (member l names)) (adjoin l names-found))
-                   ((consp l) (find-slot-names-aux names (cdr l)
-						   (find-slot-names-aux names (car l) names-found)))
-                   (t names-found))))
+	     (cond
+               ((and (symbolp l) (member l names)) (adjoin l names-found))
+               ((consp l) (find-slot-names-aux names (cdr l) (find-slot-names-aux names (car l) names-found)))
+               (t names-found))))
     (find-slot-names-aux slot-names expr nil)))
 
 
-;; Recursively search for the values from sums in l
+;; Return a non-nil value if there is some symbol from syms in l
 (defun exists-rec (syms l)
   (if (consp l)
-    (or (exists-rec syms (car l)) (exists-rec syms (cdr l)))
-    (member l syms)))
+      (or (exists-rec syms (car l)) (exists-rec syms (cdr l)))
+      (member l syms)))
 
 
-;; Mostly like member but recursively
+;; Return a list of lists which their first element is the symbol sym
 (defun find-many-rec (sym l)
   (if (listp l)
       (if (eq sym (car l))
 	  (list l)
 	  (iter (for elem in l)
 	    (appending (find-many-rec sym elem))))
-    nil))
+      nil))
 
 
 ;; Substitute every ocurrence of each symbol in assoc-symbol by
-;; its associated symbol
+;; its associated symbol. assoc-symbols is a property list.
 (defun rec-substitute (assoc-symbols l)
   (cond
     ((and (symbolp l) (member l assoc-symbols)) (getf assoc-symbols l))
@@ -55,55 +48,112 @@
     (t l)))
 
 
+;; Name designator predicate
+(defun name-desp (name)
+  (or (keywordp name)
+      (symbolp name)
+      (stringp name)))
+
+;; Return t if two symbols of two name designators are the same
+(defun name= (name1 name2)
+  (eq (name-des-symbol name1) (name-des-symbol name2)))
+
+;; Turn a name designator into a keyword
+(defun name-des-keyword (name)
+  (cond
+    ((keywordp name) name)
+    ((symbolp name) (intern (string name) "KEYWORD"))
+    ((stringp name) (intern (string-upcase name) "KEYWORD"))))
+
+;; Turn a name designator into a symbol
+(defun name-des-symbol (name)
+  (cond
+    ((keywordp name) (intern (string name)))
+    ((symbolp name) name)
+    ((stringp name) (intern (string-upcase name)))))
+
+;; Turn a name designator into a string
+(defun name-des-string (name)
+  (let ((*print-case* :downcase))
+    (princ-to-string name)))
+
+
+;; Type designator
+(defun type-desp (type)
+  (or (consp type)
+      (stringp type)
+      (symbolp type)))
+
+;; Turn a type designator into a string
+(defun type-des-string (str)
+  (let ((*print-case* :downcase))
+    (princ-to-string str)))
+
 ;; -------------------------------------------
 ;; ----- Documentation default functions -----
 ;; -------------------------------------------
 
-;; Advance global option declaration
-(defparameter *enable-doc-generation* nil)
-
-
 (defun doc-header-default (name file)
-  (when *enable-doc-generation*
-    (format file "# ~a~%~%" name)))
+  (format file "# ~a~%~%" name))
 
 (defun doc-subheader-default (name file)
-  (when *enable-doc-generation*
-    (format file "## ~a~%~%" name)))
+  (format file "## ~a~%~%" name))
 
 (defun doc-subsubheader-default (name file)
-  (when *enable-doc-generation*
-    (format file "### ~a~%~%" name)))
+  (format file "### ~a~%~%" name))
 
 (defun doc-note-default (note file)
-  (when *enable-doc-generation*
-    (format file "* **Note**: ~a~%~%" note)))
+  (format file "* **Note**: ~a~%~%" note))
 
 (defun doc-defwith-default (name create destroy file)
-  (let ((name-name (if (symbolp name) (string-downcase (string name)) name))
-	(create-name (if (symbolp create) (string-downcase (string create)) create))
-	(destroy-name (if (symbolp destroy) (string-downcase (string destroy)) destroy)))
+  (let ((name-str (name-des-string name))
+	(create-str (name-des-string create))
+	(destroy-str (name-des-string destroy)))
     (format file "**~a**~%```lisp~%(~a var-or-vars (&rest args)~%  &body body)~%```~%"
-	    name-name name-name)
+	    name-str name-str)
     (format file "Wrap the body expressions with `~a` and `~a`."
-	    create-name destroy-name)
+	    create-str destroy-str)
     (format file " The new object(s) is(are) bound to var.")
     (format file " The arguments `args` are passed to the constructor.")
     (format file "~%~%")))
 
+(defun doc-foreign-callback-definer-default (name create-info return-info file)
+  (let ((name-str (name-des-string name))
+	(args-str (mapcar (lambda (x) (name-des-string (car x))) create-info))
+	(arg-types-str (mapcar (lambda (x) (name-des-string (cadr x))) create-info))
+	(arg-typesp (mapcar #'caddr create-info))
+	(ret-arg-str (name-des-string (car return-info)))
+	(ret-type-str (name-des-string (cadr return-info)))
+	(ret-typep (caddr return-info)))
+    (format file "**~a**~%```lisp~%(~a (~{~a~^ ~})~% &body body) => ~a~%```~%"
+	    name-str name-str args-str ret-arg-str)
+    (format file "Define a callback function.~%~%")
+    (when create-info
+      (format file "* *Parameters:*~%")
+      (iter (for arg-str in args-str)
+	(for arg-type-str in arg-types-str)
+	(for arg-typep in arg-typesp)
+	(format file "  * *~a*" arg-str)
+	(when arg-typep
+	  (format file ": `~a`" arg-type-str))
+	(format file "~%"))
+      (format file "~%"))
+    (when return-info
+      (format file "* *Return:*~%")
+      (format file "  * *~a*" ret-arg-str)
+      (when ret-typep
+	(format file ": `~a`" ret-type-str))
+      (format file "~%~%"))))
+
 (defun doc-foreign-function-default (name args type-decls result-decls file)
-  (let* ((name-name (if (symbolp name) (string-downcase (string name)) name))
-	 (arg-names-assoc (iter (for type-decl in type-decls)
-			    (appending (list (if (symbolp (car type-decl))
-						 (car type-decl)
-						 (intern (string-upcase (car type-decl))))
-					     (if (stringp (car type-decl))
-						 (car type-decl)
-						 (string-downcase (string (car type-decl))))))))
-	 (arg-names (rec-substitute arg-names-assoc args)))
-    (format file "**~a**~%```lisp~%(~a" name-name name-name)
+  (let* ((name-str (name-des-string name))
+	 (typed-names-sym-str (iter (for type-decl in type-decls)
+				(appending (list (name-des-symbol (car type-decl))
+						 (name-des-string (car type-decl))))))
+	 (args-str (rec-substitute typed-names-sym-str args)))
+    (format file "**~a**~%```lisp~%(~a" name-str name-str)
     (when args
-      (format file "~{ ~a~}" arg-names))
+      (format file "~{ ~a~}" args-str))
     (format file ")")
     (when result-decls
       (format file " => ")
@@ -111,108 +161,88 @@
 	  (progn
 	    (format file "(values")
 	    (iter (for type-decl in result-decls)
-	      (format file " ~a" (string-downcase (string (car type-decl)))))
+	      (format file " ~a" (name-des-string (car type-decl))))
 	    (format file ")"))
-	  (format file "~a" (string-downcase (string (caar result-decls))))))
+	  (format file "~a" (name-des-string (caar result-decls)))))
     (format file "~%")
     (format file "```~%~%")
     (when type-decls
       (format file "* *Parameters*:~%")
       (iter (for type-decl in type-decls)
 	(format file "  * *~a*: `~a`~%"
-		(let ((arg-name (car type-decl)))
-		  (if (symbolp arg-name)
-		      (string-downcase (string arg-name))
-		      arg-name))
-		(let ((type (cadr type-decl)))
-		  (if (symbolp type)
-		      (string-downcase (string type))
-		      type)))
+		(name-des-string (car type-decl)) (type-des-string (cadr type-decl)))
 	(finally (format file "~%"))))
     (when result-decls
       (format file "* *Return:*~%")
       (iter (for result-decl in result-decls)
 	(format file "  * *~a*: `~a`~%"
-		(let ((result-name (car result-decl)))
-		  (if (symbolp result-name)
-		      (string-downcase (string result-name))
-		      result-name))
-		(let ((type (cadr result-decl)))
-		  (if (symbolp type)
-		      (string-downcase (string type))
-		      type)))
-	(finally "~%")))))
+		(name-des-string (car result-decl)) (type-des-string (cadr result-decl)))
+	(finally (format file "~%"))))))
 
 (defun doc-foreign-struct-default (doc-create-info doc-destroy-info doc-accessors-info type-infos
 				   type infix file)
   (destructuring-bind (no-constructor-p constructor-parameters) doc-create-info
-    (let* ((type-name (if (symbolp type) (string-downcase (string type)) type))
-	   (infix-name (if (symbolp infix) (string-downcase (string infix)) infix))
-	   (constructor-name (concatenate 'string "create-" infix-name))
-	   (destructor-name (concatenate 'string "destroy-" infix-name))
+    (let* ((type-str (name-des-string type))
+	   (infix-str (name-des-string infix))
+	   (constructor-str (concatenate 'string "create-" infix-str))
+	   (destructor-str (concatenate 'string "destroy-" infix-str))
 	   (no-destructor-p doc-destroy-info))
-      (doc-subsubheader type-name file)
+      (doc-subsubheader-default type-str file)
       (let* ((struct-members (union (mapcar #'car constructor-parameters)
 				    (mapcar #'car doc-accessors-info)
-				    :test (lambda (x y) (string= (string-upcase (string x))
-								 (string-upcase (string y)))))))
+				    :test #'name=)))
 	(when struct-members
 	  (format file "**Members**~%")
 	  (iter (for struct-member in struct-members)
-	    (format file "* *~a*" (if (symbolp struct-member)
-				      (string-downcase (string struct-member))
-				      struct-member))
-	    (let ((type-infop (member (if (symbolp struct-member)
-					  struct-member
-					  (intern (string-upcase struct-member)))
-				      type-infos :key #'car)))
-		  (when type-infop
-		    (let ((type-info (cadar type-infop)))
-		      (format file ": `~a`" (if (stringp type-info)
-						type-info
-						(string-downcase (format nil "~a" type-info)))))))
+	    (format file "* *~a*" (name-des-string struct-member))
+	    (let ((type-infop (member (name-des-symbol struct-member) type-infos :key #'car)))
+	      (when type-infop
+		(format file ": `~a`" (type-des-string (cadar type-infop)))))
 	    (format file "~%"))
 	  (format file "~%")))
       (when (not no-constructor-p)
 	(format file "**~a**~%```lisp~%(~a"
-		constructor-name constructor-name)
+		constructor-str constructor-str)
 	(when constructor-parameters
 	  (format file " &key~%")
 	  (iter (for param in constructor-parameters)
-		(destructuring-bind (keyword init-form) param
-		  (let ((keyword-name (if (symbolp keyword) (string-downcase (string keyword)) keyword))
-			(num-spaces (+ (length constructor-name) 4)))
-		    (format file (concatenate 'string "~" (write-to-string num-spaces) "T(~a ~a)~%")
-			    keyword-name init-form))))
+	    (destructuring-bind (keyword init-form) param
+	      (let ((keyword-str (name-des-string keyword))
+		    (num-spaces (+ (length constructor-str) 4)))
+		(when (not (first-iteration-p))
+		  (format file "~%"))
+		(format file (concatenate 'string "~" (write-to-string num-spaces) "T(~a ~a)")
+			keyword-str init-form))))
 	  (format file ")~%```~%~%")))
-    (when (not no-destructor-p)
-      (format file "**~a**~%```lisp~%(~a obj)~%```~%~%"
-	      destructor-name destructor-name))
-    (when (and (not no-constructor-p) (not no-constructor-p))
-      (doc-defwith (concatenate 'string "with-" infix-name) constructor-name destructor-name file))
-    (when doc-accessors-info
-      (format file "**Accessors**~%```lisp~%")
-      (iter (for doc-accessor-info in doc-accessors-info)
-	    (destructuring-bind (slot-name rest-parameters setf-ablep) doc-accessor-info
-	      (let ((get-name (concatenate 'string infix-name "-" (if (symbolp slot-name)
-								      (string-downcase (string slot-name))
-								      slot-name))))
-		(format file "(~a obj~{ ~a~})" get-name rest-parameters)
-		(if setf-ablep
-		    (format file " ; setf-able"))
-		(format file "~%"))))
-      (format file "```~%~%")))))
+      (when (not no-destructor-p)
+	(format file "**~a**~%```lisp~%(~a obj)~%```~%~%"
+		destructor-str destructor-str))
+      (when (and (not no-constructor-p) (not no-constructor-p))
+	(doc-defwith (concatenate 'string "with-" infix-str) constructor-str destructor-str file))
+      (when doc-accessors-info
+	(format file "**Accessors**~%```lisp~%")
+	(iter (for doc-accessor-info in doc-accessors-info)
+	  (destructuring-bind (slot-name rest-parameters setf-ablep) doc-accessor-info
+	    (let ((get-name (concatenate 'string infix-str "-" (name-des-string slot-name))))
+	      (format file "(~a obj~{ ~a~})" get-name rest-parameters)
+	      (if setf-ablep
+		  (format file " ; setf-able"))
+	      (format file "~%"))))
+	(format file "```~%~%")))))
 
 
 ;; ----------------------------------------
 ;; ----- Documentation global options -----
 ;; ----------------------------------------
 
+(defparameter *enable-doc-generation* nil)
+
 (defparameter *doc-header-proc* #'doc-header-default)
 (defparameter *doc-subheader-proc* #'doc-subheader-default)
 (defparameter *doc-subsubheader-proc* #'doc-subsubheader-default)
 (defparameter *doc-note-proc* #'doc-note-default)
 (defparameter *doc-defwith-proc* #'doc-defwith-default)
+(defparameter *doc-foreign-callback-definer-proc* #'doc-foreign-callback-definer-default)
 (defparameter *doc-foreign-function-proc* #'doc-foreign-function-default)
 (defparameter *doc-foreign-struct-proc* #'doc-foreign-struct-default)
 
@@ -221,20 +251,27 @@
 ;; ----- Documentation functions -----
 ;; -----------------------------------
 
-(defun doc-header (name file)
-  (funcall *doc-header-proc* name file))
+(defmacro doc-header (name file)
+  (if (and *enable-doc-generation* file)
+      `(funcall *doc-header-proc* ,name ,file)))
 
-(defun doc-subheader (name file)
-  (funcall *doc-subheader-proc* name file))
+(defmacro doc-subheader (name file)
+  (if (and *enable-doc-generation* file)
+      `(funcall *doc-subheader-proc* ,name ,file)))
 
-(defun doc-subsubheader (name file)
-  (funcall *doc-subsubheader-proc* name file))
+(defmacro doc-subsubheader (name file)
+  (if (and *enable-doc-generation* file)
+      `(funcall *doc-subsubheader-proc* ,name ,file)))
 
-(defun doc-note (name file)
-  (funcall *doc-note-proc* name file))
+(defmacro doc-note (name file)
+  (if (and *enable-doc-generation* file)
+      `(funcall *doc-note-proc* ,name ,file)))
 
 (defun doc-defwith (name create destroy file)
   (funcall *doc-defwith-proc* name create destroy file))
+
+(defun doc-foreign-callback-definer (name create-info return-info file)
+  (funcall *doc-foreign-callback-definer-proc* name create-info return-info file))
 
 (defun doc-foreign-function (name args type-decls result-decls file)
   (funcall *doc-foreign-function-proc* name args type-decls result-decls file))
@@ -249,30 +286,216 @@
 ;; ----- defwith -----
 ;; -------------------
 
+(defun check-defwith-name (name)
+  (unless (name-desp name)
+    (error "Expected a name designator.~%Found:~%   ~S" name)))
+
+(defun check-create (name)
+  (unless (name-desp name)
+    (error "Expected a name designator.~%Found:~%   ~S" name)))
+
+(defun check-destroy (name)
+  (unless (name-desp name)
+    (error "Expected a name designator.~%Found:~%   ~S" name)))
+
+(defun check-destructor-arity (arity)
+  (unless (and (integerp arity)
+	       (>= arity 1))
+    (error "Expected a positive integer after :destructor-arity.~%Found:~%   ~S" arity)))
+
+(defun check-destructor-arguments (arg-positions)
+  (unless (and (listp arg-positions)
+	       (iter (for n in arg-positions)
+		 (always (and (integerp n)
+			      (>= n 0)))))
+    (error "Expected a list of non-negative integers.~%Found:~%   ~S" arg-positions)))
+
 ;; Defines a with macro named name, using a constructor and a destructor
 ;; The constructor can receive zero or more arguments and can return one or more values
-;; The destructor must receive 'destructor-arity' arguments. These arguments are the first values the
-;; constructor returns
+;; The destructor must receive 'destructor-arity' arguments or the arguments described by 'destructor-arguments'
 ;; The resulting macro binds some vars to the results from the constructor. These vars can be fewer than the returned values
-(defmacro defwith (name file create destroy &key (destructor-arity 1) (destructor-arguments nil))
+(defmacro defwith (name file create destroy &key (destructor-arity 1 destructor-arityp) (destructor-arguments nil destructor-argumentsp))
+  (check-defwith-name name)
+  (check-create create)
+  (check-destroy destroy)
+  (when destructor-arityp
+    (check-destructor-arity destructor-arity))
+  (when destructor-argumentsp
+    (check-destructor-arguments destructor-arguments))
   (with-gensyms ((var "var") (var-list "var-list") (args "args") (ret-list "ret-list") (body "body"))
     `(progn
-       (defmacro ,name (,var ,args &body ,body)
+       (defmacro ,(name-des-symbol name) (,var ,args &body ,body)
 	 (with-gensyms ((,ret-list "ret-list"))
            (let ((,var-list (if (listp ,var)
 				,var
 				(list ,var))))
-             `(let ((,,ret-list (multiple-value-list (,',create ,@,args))))
+             `(let ((,,ret-list (multiple-value-list (,',(name-des-symbol create) ,@,args))))
 		(unwind-protect
                      (multiple-value-bind ,,var-list (values-list ,,ret-list)
                        ,@,body)
-                  (apply #',',destroy ,,(if destructor-arguments
-					    ``(loop for index in ',',destructor-arguments
-						    collect (nth index ,,ret-list))
-					    ``(subseq ,,ret-list 0 ,',destructor-arity))))))))
+                  (apply #',',(name-des-symbol destroy) ,,(if destructor-arguments
+							   ``(loop for index in ',',destructor-arguments
+								   collect (nth index ,,ret-list))
+							   ``(subseq ,,ret-list 0 ,',destructor-arity))))))))
        ,@(if (and *enable-doc-generation* file)
 	     `((doc-defwith ',name ',create ',destroy ,file))
 	     nil))))
+
+
+;; ----------------------------------------
+;; ----- def-foreign-callback-definer -----
+;; ----------------------------------------
+
+(defun check-definer-name (name)
+  (unless (name-desp name)
+    (error "Expected a name designator.~%Found:~%   ~S" name)))
+
+(defun check-arg-slot (arg)
+  (unless (name-desp arg)
+    (error "Expected a name designator at the start of descriptor.~%Found:~%   ~S" arg)))
+
+(defun check-arg-type (type arg-slot)
+  (unless (type-desp type)
+    (error "Expected a type designator after :type in ~a descriptor.~%Found:~%   ~S" (name-des-string arg-slot) type)))
+
+(defun check-arg-foreign-type (ftype arg-slot)
+  (unless (or (symbolp ftype)
+	      (and (listp ftype)
+		   (eq (car ftype) :struct)))
+    (error "Expected a cffi type after :foreign-type in ~a descriptor.~%Found:~%   ~s" arg-slot ftype)))
+
+(defun check-arg-create (arg-create arg-slot)
+  (unless (exists-rec (list (name-des-symbol arg-slot)) arg-create)
+    (error "Create expression must use the ~a argument." (name-des-string arg-create))))
+
+(defun check-arg-return (arg-return arg-slot)
+  (unless (exists-rec (list (name-des-symbol arg-slot)) arg-return)
+    (error "Return expression must use the ~a argument." (name-des-string arg-return))))
+
+(defun check-arg-descriptor (arg-descriptor)
+  (unless (and (listp arg-descriptor)
+	       (not (null arg-descriptor)))
+    (error "Expected a non-null list.~%Found:~%   ~S" arg-descriptor))
+  (check-arg-slot (car arg-descriptor))
+  (let ((createp (member :create arg-descriptor))
+	(returnp (member :return arg-descriptor))
+	(arg-ftypep (member :foreign-type arg-descriptor)))
+    (when (and createp returnp)
+      (error "Just one of :create or :return can appear in an argument descriptor.~%Found in ~a descriptor:~%   ~S~%   ~S"
+	     (name-des-string (car arg-descriptor)) (subseq createp 0 2) (subseq returnp 0 2)))
+    (unless arg-ftypep
+      (error "Expected :foreign-type and a cffi type in ~a descriptor." (car arg-descriptor)))
+    (iter (for rest-descriptor on (cdr arg-descriptor) by #'cddr)
+      (unless (member (car rest-descriptor) '(:foreign-type :type :create :return))
+	(error "Expected :foreign-type, :type, :create or :return in ~a descriptor.~%Found:~%   ~S"
+	       (name-des-string (car arg-descriptor)) (car rest-descriptor)))
+      (cond
+	((eq (car rest-descriptor) :type)
+	 (check-arg-type (cadr rest-descriptor) (car arg-descriptor)))
+	((eq (car rest-descriptor) :foreign-type)
+	 (check-arg-foreign-type (cadr rest-descriptor) (car arg-descriptor)))
+	((eq (car rest-descriptor) :create)
+	 (check-arg-create (cadr rest-descriptor) (car arg-descriptor)))
+	((eq (car rest-descriptor) :return)
+	 (check-arg-return (cadr rest-descriptor) (car arg-descriptor)))))))
+
+(defun check-arg-descriptors (arg-descriptors)
+  (iter (for arg-descriptor in arg-descriptors)
+    (check-arg-descriptor arg-descriptor)
+    (let ((arg-returnp (member :return arg-descriptor)))
+      (when arg-returnp
+	(collect arg-returnp into return-args)))
+    (finally (let ((num-return-args (length return-args)))
+	       (unless (= num-return-args 1)
+		 (error "Expected only one return argument. There are ~a:~%   (~{~S~^ ~})"
+			num-return-args return-args))))))
+
+;; Return a list of lists with two elements
+;; 1. The arg name
+;; 2. The create expression
+;; 3. The arg foreign type
+(defun extract-create-arguments (arg-descriptors)
+  (iter (for arg-descriptor in arg-descriptors)
+    (let ((createp (member :create arg-descriptor))
+	  (returnp (member :return arg-descriptor)))
+      (when (or createp (not returnp))
+	(collect (list (car arg-descriptor)
+		       (if createp (cadr createp) (name-des-symbol (car arg-descriptor)))
+		       (cadr (member :foreign-type arg-descriptor))))))))
+
+;; Return a list with two elements.
+;; 1. The return arg name
+;; 2. The return expression
+;; 3. The return foreign type
+(defun extract-return-argument (arg-descriptors)
+  (iter (for arg-descriptor in arg-descriptors)
+    (let ((returnp (member :return arg-descriptor)))
+      (when returnp
+	(return (list (car arg-descriptor) (cadr returnp) (cadr (member :foreign-type arg-descriptor))))))))
+
+(defun create-inner-macro (name parameter-create-syms parameter-create-gensyms create-exprs parameter-ftypes
+			   return-argument parameter-gensyms body)
+  (let* ((return-ftype (caddr return-argument))
+	 (parameter-gensyms-ftypes (mapcar #'list parameter-gensyms parameter-ftypes))
+	 (parameter-syms-gensyms (apply #'append (mapcar #'list parameter-create-syms parameter-gensyms)))
+	 (final-create-exprs (mapcar (lambda (x)
+				       (rec-substitute parameter-syms-gensyms x))
+				     create-exprs))
+	 (syms-final-create-exprs (mapcar #'list parameter-create-gensyms final-create-exprs))
+	 (return-gensym (gensym))
+	 (return-sym (name-des-symbol (car return-argument)))
+	 (return-expr (cadr return-argument))
+	 (final-return-expr (rec-substitute (list return-sym return-gensym) return-expr)))
+    (print parameter-syms-gensyms)
+    `(cffi:defcallback ,name ,return-ftype ,parameter-gensyms-ftypes
+       (let ((,return-gensym (let ,syms-final-create-exprs
+			       ,@body)))
+	 ,final-return-expr))))
+  
+(defun create-definer-code (name create-arguments return-argument)
+  (let* ((name-gensym (gensym))
+	 (parameter-syms (mapcar (lambda (x) (name-des-symbol (car x))) create-arguments))
+	 (parameter-exprs (mapcar #'cadr create-arguments))
+	 (parameter-ftypes (mapcar #'caddr create-arguments))
+	 (body-gensym (gensym))
+	 (parameter-gensyms (mapcar (lambda (x) (gensym (string x))) parameter-syms))
+	 (parameter-gensyms-gensym (gensym))
+	 (parameter-create-gensym (gensym))
+	 (let-gensyms (mapcar (lambda (x) (list x '(gensym))) parameter-gensyms)))
+    `(defmacro ,(name-des-symbol name) (,name-gensym ,parameter-syms &body ,body-gensym)
+       (let* (,@let-gensyms
+	      (,parameter-gensyms-gensym (list ,@parameter-gensyms))
+	      (,parameter-create-gensym (list ,@parameter-syms)))
+	 (create-inner-macro ,name-gensym ',parameter-syms ,parameter-create-gensym ',parameter-exprs ',parameter-ftypes
+			     ',return-argument ,parameter-gensyms-gensym ,body-gensym)))))
+
+(defun extract-doc-create-info (arg-descriptors)
+  (iter (for arg-descriptor in arg-descriptors)
+    (when (not (member :return arg-descriptor))
+      (let ((doc-typep (member :type arg-descriptor)))
+	(if doc-typep
+	    (collect (list (car arg-descriptor) (cadr doc-typep) t))
+	    (collect (list (car arg-descriptor) nil nil)))))))
+
+(defun extract-doc-return-info (arg-descriptors)
+  (iter (for arg-descriptor in arg-descriptors)
+    (when (member :return arg-descriptor)
+      (let ((doc-typep (member :type arg-descriptor)))
+	(if doc-typep
+	    (return (list (car arg-descriptor) (cadr doc-typep) t))
+	    (return (list (car arg-descriptor) nil nil)))))))
+
+(defmacro def-foreign-callback-definer (name file &body arg-descriptors)
+  (check-definer-name name)
+  (check-arg-descriptors arg-descriptors)
+  `(progn
+     ,(create-definer-code name
+			   (extract-create-arguments arg-descriptors)
+			   (extract-return-argument arg-descriptors))
+     ,@(if (and *enable-doc-generation* file)
+	   `((doc-foreign-callback-definer ',name ',(extract-doc-create-info arg-descriptors)
+					   ',(extract-doc-return-info arg-descriptors) ,file))
+	   nil)))
 
 
 ;; --------------------------------
@@ -280,8 +503,8 @@
 ;; --------------------------------
 
 (defun check-name (name)
-  (unless (or (symbolp name) (stringp name))
-    (error "Expected a symbol or a string.~%Found:~%   ~S" name)))
+  (unless (name-desp name)
+    (error "Expected a name designator.~%Found:~%   ~S" name)))
 
 (defun check-type-declarations (decl name args)
   (when (and (listp decl) (string= (string (car decl)) "DECLARE-TYPES"))
@@ -300,16 +523,16 @@
 	(when (listp type-decl)
 	  (unless (>= (length type-decl) 2)
 	    (error "The lists must have two or more elements.~%Found in ~a:~%   ~S" name type-decl))
-	  (unless (or (symbolp (car type-decl)) (stringp (car type-decl)))
-	    (error "Expected a symbol or string at the start of a type declaration in ~a.~%Found:~%   ~a"
+	  (unless (type-desp (car type-decl))
+	    (error "Expected a type designator at the start of a type declaration in ~a.~%Found:~%   ~a"
 		   name type-decl))
 	  (iter (for sym in (cdr type-decl))
-	    (unless (or (symbolp sym) (stringp sym))
-	      (error "Expected a symbol in ~a type declaration.~%Found:~%   ~a" name type-decl))
+	    (unless (name-desp sym)
+	      (error "Expected a name designator in ~a type declaration.~%Found:~%   ~a" name type-decl))
 	    (when (= return-found 0)
-	      (let ((sym-sym (if (symbolp sym) sym (intern (string-upcase sym)))))
+	      (let ((sym-sym (name-des-symbol sym)))
 		(unless (exists-rec (list sym-sym) args)
-		  (error "There is no symbol ~a in arguments from ~a." sym name))))))))))
+		  (error "There is no symbol ~a in arguments from ~a." sym-sym name))))))))))
 
 (defun extract-type-declarations (decl)
   (if (string= (string (car decl)) "DECLARE-TYPES")
@@ -329,30 +552,28 @@
 
 (defmacro def-foreign-function (name file args &body exprs)
   (check-name name)
-  (let ((name-sym (if (symbolp name) name (intern (string-upcase name)))))
-    (check-type-declarations (car exprs) name args)
-    (let* ((type-declarations (extract-type-declarations (car exprs)))
-	   (return-declarations (extract-return-declarations (car exprs)))
-	   (final-body (if (or type-declarations return-declarations) (cdr exprs) exprs)))
-      `(progn
-	 (defun ,name-sym ,args ,@final-body)
-	 ,@(if (and *enable-doc-generation* file)
-	       `((doc-foreign-function ',name ',args ',type-declarations ',return-declarations ,file))
-	       nil)))))
+  (check-type-declarations (car exprs) name args)  
+  (let* ((type-declarations (extract-type-declarations (car exprs)))
+	 (return-declarations (extract-return-declarations (car exprs)))
+	 (final-body (if (or type-declarations return-declarations) (cdr exprs) exprs)))
+    `(progn
+       (defun ,(name-des-symbol name) ,args ,@final-body)
+       ,@(if (and *enable-doc-generation* file)
+	     `((doc-foreign-function ',name ',args ',type-declarations ',return-declarations ,file))
+	     nil))))
 
 
 ;; ------------------------------
 ;; ----- def-foreign-struct -----
 ;; ------------------------------
 
-(defun check-struct-type (type)
-  (unless (or (symbolp type)
-	      (stringp type))
-    (error "Expected a string or symbol designating a cffi struct type.~%Found:~%   ~S" type)))
+(defun check-struct-type (struct-type)
+  (unless (name-desp struct-type)
+    (error "Expected a name designator.~%Found:~%   ~S" struct-type)))
 
 (defun check-infix (infix)
-  (unless (or (symbolp infix) (stringp infix))
-    (error "Expected a symbol.~%Found:~%   ~S" infix)))
+  (unless (name-desp infix)
+    (error "Expected a name designator.~%Found:~%   ~S" infix)))
 
 (defun check-options (options)
   (unless (listp options)
@@ -363,55 +584,54 @@
       (error "Expected :no-constructor, :no-destructor, :enable-default-get, :enable-default-set, :enable-default-create or :include-invisibles.~%Found:~%   ~S"
 	     option))))
 
-(defun check-name-option (name slot-name)
-  (unless (or (symbolp name)
-	      (stringp name))
-    (error "Expected a symbol or a string in ~a descriptor.~%Found:~%   ~S"
-	   slot-name name)))
+(defun check-slot-name (slot-name slot-names struct-type)
+  (unless (name-desp slot-name)
+    (error "Expected a name designator.~%Found:~%   ~S" slot-name))
+  (unless (member (name-des-symbol slot-name) slot-names)
+    (error "Expected a slot name from ~a~%Found:~%   ~S" (name-des-string struct-type) slot-name)))
 
-;; (defun check-type-option (type slot-name)
-;;   (unless (or (symbolp type)
-;; 	      (stringp type))
-;;     (error "Expected a symbol or a string in ~a descriptor.~%Found:~%   ~S"
-;; 	   slot-name type)))
+(defun check-name-option (name slot-name)
+  (unless (name-desp name)
+    (error "Expected a name designator in ~a descriptor.~%Found:~%   ~S"
+	   (name-des-string slot-name) name)))
+
+(defun check-type-option (type slot-name)
+  (unless (type-desp type)
+    (error "Expected a type designator in ~a descriptor.~%Found:~%   ~S"
+	   (name-des-string slot-name) type)))
 
 (defun check-init-form-option (create-optionp create-option name slot-name)
   (when create-optionp
-    (let ((name-sym (if (symbolp name) name (intern (string-upcase name)))))
-      (unless (exists-rec (list name-sym) create-option)
-	(error "If the name ~a is not used in ~a descriptor, init-form is forbidden."
-	       name slot-name)))))
+    (unless (exists-rec (list (name-des-symbol name)) create-option)
+      (error "If the name ~a is not used in ~a descriptor, init-form is forbidden."
+	     (name-des-string name) slot-name))))
 
 (defun check-destroy-option (destroy slots slot-member)
   (unless (exists-rec slots destroy)
     (error "Expected the use of at least one slot member in ~a descriptor.~%Found:~%   ~S"
-	   slot-member destroy)))
+	   (name-des-string slot-member) destroy)))
 
-(defun check-get-option (get slot)
+(defun check-get-option (get slot-name)
   (unless (or (null get)
 	      (and (listp get)
 		   (listp (car get))
 		   (not (null (cadr get)))))
-    (error "Expected a get expression ((&rest args) expr) in the ~S descriptor.~%Found:~%   ~S"
-	   slot get)))
+    (error "Expected a get expression ((&rest args) expr) in the ~a descriptor.~%Found:~%   ~S"
+	   (name-des-string slot-name) get)))
 
-(defun check-set-option (set slot)
+(defun check-set-option (set slot-name)
   (unless (or (null set)
 	      (and (listp set)
 		   (listp (car set))
 		   (not (null (cadr set)))
 		   (not (member (caar set) '(&optional &key &rest &aux &allow-other-keys)))))
-    (error "Expected a set expression ((new-val &rest args) expr) in the ~S descriptor.~%Found:~%   ~S"
-	   slot set)))
-
-(defun check-slot-member (slot-member slot-names struct-type)
-  (unless (member slot-member slot-names)
-    (error "Expected a slot member from ~S~%Found:~%   ~S" struct-type slot-member)))
+    (error "Expected a set expression ((new-val &rest args) expr) in the ~a descriptor.~%Found:~%   ~S"
+	   (name-des-string slot-name) set)))
 
 (defun check-slot-descriptor (descriptor slot-names struct-type no-constructor-p no-destructor-p)
   (if (and (listp descriptor) (not (null descriptor)))
       (progn
-	(check-slot-member (car descriptor) slot-names struct-type)
+	(check-slot-name (car descriptor) slot-names struct-type)
 	(when (not (null (cdr descriptor)))
 	  (if (and no-constructor-p (member :create descriptor))
 	      (error "While :no-constructor is enabled, :create is forbidden. Found :create in ~S descriptor."
@@ -426,8 +646,8 @@
 	    (cond
 	      ((eq (car rest-descriptor) :name)
 	       (check-name-option (cadr rest-descriptor) (car descriptor)))
-	      ;; ((eq (car rest-descriptor) :type)
-	      ;;  (check-type-option (cadr rest-descriptor) (car descriptor)))
+	      ((eq (car rest-descriptor) :type)
+	       (check-type-option (cadr rest-descriptor) (car descriptor)))
 	      ((eq (car rest-descriptor) :init-form)
 	       (let* ((create-optionp (member :create descriptor))
 		      (namep (member :name descriptor))
@@ -439,7 +659,7 @@
 	       (check-get-option (cadr rest-descriptor) (car descriptor)))
 	      ((eq (car rest-descriptor) :set)
 	       (check-set-option (cadr rest-descriptor) (car descriptor)))))))
-      (check-slot-member descriptor slot-names struct-type)))
+      (check-slot-name descriptor slot-names struct-type)))
 
 
 (defun check-slot-descriptors (descriptors slot-names struct-type no-constructor-p no-destructor-p)
@@ -448,58 +668,113 @@
   (iter (for descriptor in descriptors)
     (check-slot-descriptor descriptor slot-names struct-type no-constructor-p no-destructor-p)))
 
+;; Returns a list with four elements.
+;; 1. The slot name of the descriptor.
+;; 2. t if the slot is invisible. Otherwise nil.
+;; 3. If the keyword is used, the expression after it. Otherwise nil.
+;; 4. If the keyword is used, t. Otherwise nil.
+(defun extract-descriptor-info (slot-name-sym descriptor keyword)
+  (cond
+    ((null descriptor) (list slot-name-sym t nil nil))
+    ((name-desp descriptor) (list slot-name-sym nil nil nil))
+    (t (let ((key-expr (member keyword descriptor)))
+	 (list slot-name-sym nil (cadr key-expr) (and key-expr t))))))
+
+;; Return a list with two values
+;; 1. t if :no-constructor was used. nil otherwise.
+;; 2. A list of pairs (keyword-sym init-form). The keyword-sym is symbol
+;; denotes the keyword that will be used in a constructor parameter.
+(defun doc-create-info (create-infos name-infos init-form-infos
+			no-constructor-p enable-default-creates enable-invisibles)
+  (list no-constructor-p
+	(if (not no-constructor-p)
+	    (iter (for create-info in create-infos)
+	      (destructuring-bind (slot-name-sym invisiblep create createp) create-info
+		(when (and (or enable-invisibles (not invisiblep))
+			   (or enable-default-creates createp))
+		  (when (or (and createp (exists-rec (list slot-name-sym) create))
+			    (not createp))
+		    (let* ((namep (member slot-name-sym name-infos :key #'car))
+			   (keyword-sym (if namep (cadar namep) slot-name-sym))
+			   (init-formp (member slot-name-sym init-form-infos :key #'car))
+			   (init-form (if init-formp (cadar init-formp) 0)))
+		      (collect (list keyword-sym init-form) into constructor-parameters)))))
+	      (finally (return constructor-parameters)))
+	    nil)))
+
+;; Retur t if :no-destructor was used. nil otherwise
+(defun doc-destroy-info (no-destructor-p)
+  no-destructor-p)
+
+;; Return a list of lists of 3 elements
+;; 1. The suffix of the getter (it is a name designator)
+;; 2. The additional getter parameters
+;; 3. A non-nil value if the getter is setf-able
+(defun doc-accessors-info (get-infos set-infos name-infos default-get default-set enable-invisibles)
+  (iter (for get-info in get-infos)
+    (destructuring-bind (get-slot-name-sym get-invisiblep get-expr get-expr-p) get-info
+      (when (and (or enable-invisibles (not get-invisiblep))
+		 (or get-expr (and default-get (not get-expr-p))))
+	(let* ((set-info (car (member get-slot-name-sym set-infos :key #'car))))
+	  (destructuring-bind (set-slot-name-sym set-invisiblep set-expr set-expr-p) set-info
+	    (declare (ignore set-slot-name-sym))
+	    (let* ((setf-ablep (and (or enable-invisibles (not set-invisiblep))
+				    (or set-expr (and default-set (not set-expr-p)))))
+		   (namep (member get-slot-name-sym name-infos :key #'car))
+		   (name (if namep (cadar namep) get-slot-name-sym)))
+	      (collect (list name (if get-expr-p (car get-expr) nil) setf-ablep)))))))))
+
 (defun create-constructor-code (create-infos pointer-slots name-infos init-form-infos struct-type
 				enable-default-creates enable-invisibles suffix)
   (iter (for create-info in create-infos)
-    (destructuring-bind (slot-name invisiblep create createp) create-info
+    (destructuring-bind (slot-name-sym invisiblep create createp) create-info
       (when (and (or enable-invisibles (not invisiblep))
 		 (or enable-default-creates createp))
-	(if (member slot-name pointer-slots)
-	    (collect (list :pointer slot-name) into used-slots)
-	    (collect slot-name into used-slots))
+	(if (member slot-name-sym pointer-slots)
+	    (collect (list :pointer slot-name-sym) into used-slots)
+	    (collect slot-name-sym into used-slots))
 	(if createp
 	    (progn
-	      (when (exists-rec (list slot-name) create)
-		(let* ((namep (member slot-name name-infos :key #'car))
-		       (keyword (if namep (cadar namep) slot-name))
-		       (init-formp (member slot-name init-form-infos :key #'car))
+	      (when (exists-rec (list slot-name-sym) create)
+		(let* ((namep (member slot-name-sym name-infos :key #'car))
+		       (keyword-name (if namep (cadar namep) slot-name-sym))
+		       (init-formp (member slot-name-sym init-form-infos :key #'car))
 		       (init-form (if init-formp (cadar init-formp) 0)))
-		  (collect (list (list (intern (string-upcase (string keyword)) "KEYWORD") slot-name) init-form)
+		  (collect (list (list (name-des-keyword keyword-name) slot-name-sym) init-form)
 		    into constructor-parameters))
 		(let ((new-sym (gensym)))
 		  (collect new-sym into constructor-syms)
-		  (appending (list slot-name new-sym)
-			     into constructor-parameter-syms)))
+		  (appending (list slot-name-sym new-sym) into constructor-parameter-syms)))
 	      (let ((new-sym (gensym)))
 		(collect new-sym into let-syms)
 		(collect new-sym into setf-syms))
 	      (collect create into let-exprs))
 	    (progn
-	      (let* ((namep (member slot-name name-infos :key #'car))
-		     (keyword (if namep (cadar namep) slot-name))
-		     (init-formp (member slot-name init-form-infos :key #'car))
+	      (let* ((namep (member slot-name-sym name-infos :key #'car))
+		     (keyword-name (if namep (cadar namep) slot-name-sym))
+		     (init-formp (member slot-name-sym init-form-infos :key #'car))
 		     (init-form (if init-formp (cadar init-formp) 0)))
-		(collect (list (list (intern (string-upcase (string keyword)) "KEYWORD") slot-name) init-form)
+		(collect (list (list (name-des-keyword keyword-name) slot-name-sym) init-form)
 		  into constructor-parameters))
 	      (let ((new-sym (gensym)))
-		(appending (list slot-name new-sym) into constructor-parameter-syms)
+		(appending (list slot-name-sym new-sym) into constructor-parameter-syms)
 		(collect new-sym into setf-syms))))))
-    (finally (return `(defun ,(intern (concatenate 'string "CREATE-" (string suffix)))
+    (finally (return `(defun ,(intern (concatenate 'string "CREATE-" (string-upcase (name-des-string suffix))))
 			  (&key ,@(rec-substitute constructor-parameter-syms constructor-parameters))
 			,(let ((object-sym (gensym)))
 			   `(let* (,@(mapcar #'list let-syms (rec-substitute constructor-parameter-syms
 									     let-exprs))
-				   (,object-sym (cffi:foreign-alloc ',struct-type)))
-			      (memset ,object-sym 0 (cffi:foreign-type-size ',struct-type))
-			      (cffi:with-foreign-slots (,used-slots ,object-sym ,struct-type)
+				   (,object-sym (cffi:foreign-alloc '(:struct ,(name-des-symbol struct-type)))))
+			      (memset ,object-sym 0 (cffi:foreign-type-size '(:struct ,(name-des-symbol struct-type))))
+			      (cffi:with-foreign-slots (,used-slots ,object-sym (:struct ,(name-des-symbol struct-type)))
 				(setf ,@(apply #'append (mapcar #'list used-slots setf-syms))))
 			      (values ,object-sym))))))))
 
 (defun create-destructor-code (destroy-infos pointer-slots struct-type suffix)
-  (let ((slot-names (cffi:foreign-slot-names struct-type)))
+  (let ((slot-names (cffi:foreign-slot-names (list :struct (name-des-symbol struct-type)))))
     (iter (for destroy-info in destroy-infos)
-      (destructuring-bind (slot-name invisiblep destroy destroyp) destroy-info
-	(declare (ignore slot-name invisiblep))
+      (destructuring-bind (slot-name-sym invisiblep destroy destroyp) destroy-info
+	(declare (ignore slot-name-sym invisiblep))
 	(when destroyp
 	  (collect destroy into destroy-exprs)
 	  (unioning (find-slot-names slot-names destroy) into used-slots)))
@@ -508,44 +783,45 @@
 								       (list :pointer x)
 								       x))
 						       used-slots)))
-			 `(defun ,(intern (concatenate 'string "DESTROY-" (string suffix))) (,arg)
-			    (cffi:with-foreign-slots (,final-used-slots ,arg ,struct-type)
-			      ,@destroy-exprs)
+			 `(defun ,(intern (concatenate 'string "DESTROY-" (string-upcase (name-des-string suffix)))) (,arg)
+			    ,(when final-used-slots
+			       `(cffi:with-foreign-slots (,final-used-slots ,arg (:struct ,(name-des-symbol struct-type)))
+				  ,@destroy-exprs))
 			    (cffi:foreign-free ,arg))))))))
 
 (defun create-with-code (suffix)
-  `(defwith ,(intern (concatenate 'string "WITH-" (string suffix))) nil
-       ,(intern (concatenate 'string "CREATE-" (string suffix)))
-     ,(intern (concatenate 'string "DESTROY-" (string suffix)))))
+  `(defwith ,(intern (concatenate 'string "WITH-" (string-upcase (name-des-string suffix)))) nil
+     ,(intern (concatenate 'string "CREATE-" (string-upcase (name-des-string suffix))))
+     ,(intern (concatenate 'string "DESTROY-" (string-upcase (name-des-string suffix))))))
 
 (defun create-get-codes (get-infos pointer-slots name-infos struct-type
 			 enable-default-get enable-invisibles prefix)
-  (let ((slot-names (cffi:foreign-slot-names struct-type)))
+  (let ((slot-names (cffi:foreign-slot-names (list :struct (name-des-symbol struct-type)))))
     (iter (for get-info in get-infos)
-      (destructuring-bind (slot-name invisiblep get-expr get-expr-p) get-info
+      (destructuring-bind (slot-name-sym invisiblep get-expr get-expr-p) get-info
 	(when (and (or enable-invisibles (not invisiblep))
 		   (or get-expr (and enable-default-get (not get-expr-p))))
 	  (let* ((object-arg (gensym))
 		 (args (cons object-arg (if get-expr (car get-expr) nil)))
-		 (final-get-expr (if get-expr (cons 'progn (cdr get-expr)) slot-name))
+		 (final-get-expr (if get-expr (cons 'progn (cdr get-expr)) slot-name-sym))
 		 (used-slots (find-slot-names slot-names final-get-expr))
 		 (final-used-slots (mapcar (lambda (x) (if (member x pointer-slots)
 							   (list :pointer x)
 							   x))
 					   used-slots))
-		 (namep (member slot-name name-infos :key #'car))
-		 (name (if namep (cadar namep) slot-name)))
-	    (collect `(defun ,(intern (concatenate 'string (string-upcase (string prefix)) "-"
-						   (string-upcase (string name))))
+		 (namep (member slot-name-sym name-infos :key #'car))
+		 (name (if namep (cadar namep) slot-name-sym)))
+	    (collect `(defun ,(intern (concatenate 'string (string-upcase (name-des-string prefix)) "-"
+						   (string-upcase (name-des-string name))))
 			,args
-			(cffi:with-foreign-slots (,final-used-slots ,(car args) ,struct-type)
+			(cffi:with-foreign-slots (,final-used-slots ,(car args) (:struct ,(name-des-symbol struct-type)))
 			  ,final-get-expr)))))))))
 
 (defun create-set-codes (set-infos pointer-slots name-infos struct-type
 			 enable-default-set enable-invisibles prefix)
-  (let ((slot-names (cffi:foreign-slot-names struct-type)))
+  (let ((slot-names (cffi:foreign-slot-names (list :struct (name-des-symbol struct-type)))))
     (iter (for set-info in set-infos)
-      (destructuring-bind (slot-name invisiblep set-expr set-expr-p) set-info
+      (destructuring-bind (slot-name-sym invisiblep set-expr set-expr-p) set-info
 	(when (and (or enable-invisibles (not invisiblep))
 		   (or set-expr (and enable-default-set (not set-expr-p))))
 	  (let* ((object-arg (gensym))
@@ -553,142 +829,88 @@
 		 (args (if set-expr
 			   `(,new-value-arg ,object-arg ,@(cdar set-expr))
 			   `(,new-value-arg ,object-arg)))
-		 (final-set-expr (if set-expr (cons 'progn (cdr set-expr)) `(setf ,slot-name ,new-value-arg)))
+		 (final-set-expr (if set-expr (cons 'progn (cdr set-expr)) `(setf ,slot-name-sym ,new-value-arg)))
 		 (used-slots (find-slot-names slot-names final-set-expr))
 		 (final-used-slots (mapcar (lambda (x) (if (member x pointer-slots)
 							   (list :pointer x)
 							   x))
 					   used-slots))
-		 (namep (member slot-name name-infos :key #'car))
-		 (name (if namep (cadar namep) slot-name)))
-	    (collect `(defun (setf ,(intern (concatenate 'string (string-upcase (string prefix)) "-"
-							 (string-upcase (string name)))))
+		 (namep (member slot-name-sym name-infos :key #'car))
+		 (name (if namep (cadar namep) slot-name-sym)))
+	    (collect `(defun (setf ,(intern (concatenate 'string (string-upcase (name-des-string prefix)) "-"
+							 (string-upcase (name-des-string name)))))
 			,args
-			(cffi:with-foreign-slots (,final-used-slots ,object-arg ,struct-type)
+			(cffi:with-foreign-slots (,final-used-slots ,object-arg (:struct ,(name-des-symbol struct-type)))
 			  ,final-set-expr)))))))))
 
-(defun doc-create-info (create-infos name-infos init-form-infos
-			no-constructor-p enable-default-creates enable-invisibles)
-  (if (not no-constructor-p)
-      (iter (for create-info in create-infos)
-	(destructuring-bind (slot-name invisiblep create createp) create-info
-	  (when (and (or enable-invisibles (not invisiblep))
-		     (or enable-default-creates createp))
-	    (when (or (and createp (exists-rec (list slot-name) create))
-		      (not createp))
-	      (let* ((namep (member slot-name name-infos :key #'car))
-		     (keyword (if namep (cadar namep) slot-name))
-		     (init-formp (member slot-name init-form-infos :key #'car))
-		     (init-form (if init-formp (cadar init-formp) 0)))
-		(collect (list keyword init-form)
-		  into constructor-parameters)))))
-	(finally (return (list nil constructor-parameters))))
-      (list t nil)))
-
-(defun doc-destroy-info (no-destructor-p)
-  no-destructor-p)
-
-(defun doc-accessors-info (get-infos set-infos name-infos default-get default-set enable-invisibles)
-  (iter (for get-info in get-infos)
-    (destructuring-bind (get-slot-name get-invisiblep get-expr get-expr-p) get-info
-      (when (and (or enable-invisibles (not get-invisiblep))
-		 (or get-expr (and default-get (not get-expr-p))))
-	(let* ((set-info (car (member get-slot-name set-infos :key #'car))))
-	  (destructuring-bind (set-slot-name set-invisiblep set-expr set-expr-p) set-info
-	    (declare (ignore set-slot-name))
-	    (let* ((setf-ablep (and (or enable-invisibles (not set-invisiblep))
-				    (or set-expr (and default-set (not set-expr-p)))))
-		   (namep (member get-slot-name name-infos :key #'car))
-		   (name (if namep (cadar namep) get-slot-name)))
-	      (collect (list name
-			     (if get-expr-p (car get-expr) nil)
-			     setf-ablep)))))))))
-
-;; Returns a list with four elements.
-;; 1. The slot name of the descriptor.
-;; 2. t if the slot is invisible. Otherwise nil.
-;; 3. If the keyword is used, the expression after it. Otherwise nil.
-;; 4. If the keyword is used, t. Otherwise nil.
-(defun extract-descriptor-info (slot-name descriptor keyword)
-  (cond
-    ((null descriptor) (list slot-name t nil nil))
-    ((symbolp descriptor) (list slot-name nil nil nil))
-    (t (let ((key-expr (member keyword descriptor)))
-	 (list slot-name nil (cadr key-expr) (and key-expr t))))))
-
-(defmacro def-foreign-struct (type infix file options &body slot-descriptors)
-  (check-struct-type type)
+(defmacro def-foreign-struct (struct-type infix file options &body slot-descriptors)
+  (check-struct-type struct-type)
   (check-infix infix)
   (check-options options)
-  (let ((struct-type (list :struct (if (symbolp type) type (intern (string-upcase type))))))
-    (check-slot-descriptors slot-descriptors (cffi:foreign-slot-names struct-type)
-			    struct-type
-			    (member :no-constructor options) (member :no-destructor options))
-    (let ((no-constructorp (member :no-constructor options))
-	  (no-destructorp  (member :no-destructor options))
-	  (default-createp (member :enable-default-create options))
-	  (default-getp    (member :enable-default-get options))
-	  (default-setp    (member :enable-default-set options))
-	  (invisiblesp     (member :include-invisibles options))
-	  (infix-sym       (if (symbolp infix) infix (intern (string-upcase infix)))))
-      (iter (for slot-name in (cffi:foreign-slot-names struct-type))
-	    (let ((slot-descriptor (car (member slot-name slot-descriptors :key (lambda (x) (if (listp x)
-												(car x)
-												x))))))
-	      (if (and (listp slot-descriptor)
-		       (not (null slot-descriptor))
-		       (cadr (member :pointer slot-descriptor)))
-		  (collect slot-name                                                    into pointer-slots))
-	      (if (and (listp slot-descriptor)
-		       (not (null slot-descriptor)))
-		  (let ((namep (member :name slot-descriptor)))
-		    (if namep
-			(collect (list slot-name (cadr namep))                          into name-infos))))
-	      (if (and (listp slot-descriptor)
-		       (not (null slot-descriptor)))
-		  (let ((typep (member :type slot-descriptor)))
-		    (if typep
-			(collect (list slot-name (cadr typep))                          into type-infos))))
-	      (if (and (listp slot-descriptor)
-		       (not (null slot-descriptor)))
-		  (let ((init-formp (member :init-form slot-descriptor)))
-		    (if init-formp
-			(collect (list slot-name (cadr init-formp))                     into init-form-infos))))
-	      (if (not no-constructorp)
-		  (collect (extract-descriptor-info slot-name slot-descriptor :create)  into create-infos))
-	      (if (not no-destructorp)
-		  (collect (extract-descriptor-info slot-name slot-descriptor :destroy) into destroy-infos))
-	      (collect (extract-descriptor-info slot-name slot-descriptor :get)         into get-infos)
-	      (collect (extract-descriptor-info slot-name slot-descriptor :set)         into set-infos))
-	    (finally (return `(progn
-				,@(unless no-constructorp
-				    (list (create-constructor-code create-infos pointer-slots name-infos
-								   init-form-infos struct-type
-								   default-createp
-								   invisiblesp
-								   infix-sym)))
-				,@(unless no-destructorp
-				    (list (create-destructor-code destroy-infos pointer-slots
-								  struct-type infix-sym)))
-				,@(unless (or no-constructorp
-					      no-destructorp)
-				    (list (create-with-code infix)))
-				,@(create-get-codes get-infos pointer-slots name-infos struct-type
-						    default-getp invisiblesp infix-sym)
-				,@(create-set-codes set-infos pointer-slots name-infos struct-type
-						    default-setp invisiblesp infix-sym)
-				,@(let ((file-sym (gensym)))
-				    (when (and *enable-doc-generation* file)
-				      `((let ((,file-sym ,file))
-					  (doc-foreign-struct ',(doc-create-info create-infos name-infos
-										 init-form-infos
-										 no-constructorp
-										 default-createp
-										 invisiblesp)
-							      ',(doc-destroy-info no-destructorp)
-							      ',(doc-accessors-info get-infos set-infos
-										    name-infos
-										    default-getp default-setp
-										    invisiblesp)
-							      ',type-infos ,type ',infix
-							      ,file-sym))))))))))))
+  (check-slot-descriptors slot-descriptors (cffi:foreign-slot-names (list :struct (name-des-symbol struct-type)))
+			  struct-type (member :no-constructor options) (member :no-destructor options))
+  (let ((no-constructorp (member :no-constructor options))
+	(no-destructorp  (member :no-destructor options))
+	(default-createp (member :enable-default-create options))
+	(default-getp    (member :enable-default-get options))
+	(default-setp    (member :enable-default-set options))
+	(invisiblesp     (member :include-invisibles options)))
+    (iter (for slot-name-sym in (cffi:foreign-slot-names (list :struct (name-des-symbol struct-type))))
+      (let ((slot-descriptor (car (member slot-name-sym slot-descriptors :key (lambda (x) (if (listp x) (car x) x))))))
+	(when (and (listp slot-descriptor)
+		   (not (null slot-descriptor))
+		   (cadr (member :pointer slot-descriptor)))
+	  (collect slot-name-sym                                                 into pointer-slots))
+	(when (and (listp slot-descriptor)
+		   (not (null slot-descriptor)))
+	  (let ((namep (member :name slot-descriptor)))
+	    (when namep
+	      (collect (list slot-name-sym (cadr namep))                          into name-infos))))
+	(when (and (listp slot-descriptor)
+		   (not (null slot-descriptor)))
+	  (let ((typep (member :type slot-descriptor)))
+	    (when typep
+	      (collect (list slot-name-sym (cadr typep))                          into type-infos))))
+	(when (and (listp slot-descriptor)
+		   (not (null slot-descriptor)))
+	  (let ((init-formp (member :init-form slot-descriptor)))
+	    (when init-formp
+	      (collect (list slot-name-sym (cadr init-formp))                     into init-form-infos))))
+	(when (not no-constructorp)
+	  (collect (extract-descriptor-info slot-name-sym slot-descriptor :create)  into create-infos))
+	(when (not no-destructorp)
+	  (collect (extract-descriptor-info slot-name-sym slot-descriptor :destroy) into destroy-infos))
+	(collect (extract-descriptor-info slot-name-sym slot-descriptor :get)         into get-infos)
+	(collect (extract-descriptor-info slot-name-sym slot-descriptor :set)         into set-infos))
+      (finally (return `(progn
+			  ,@(unless no-constructorp
+			      (list (create-constructor-code create-infos pointer-slots name-infos
+							     init-form-infos struct-type
+							     default-createp
+							     invisiblesp
+							     infix)))
+			  ,@(unless no-destructorp
+			      (list (create-destructor-code destroy-infos pointer-slots
+							    struct-type infix)))
+			  ,@(unless (or no-constructorp
+					no-destructorp)
+			      (list (create-with-code infix)))
+			  ,@(create-get-codes get-infos pointer-slots name-infos struct-type
+					      default-getp invisiblesp infix)
+			  ,@(create-set-codes set-infos pointer-slots name-infos struct-type
+					      default-setp invisiblesp infix)
+			  ,@(let ((file-sym (gensym)))
+			      (when (and *enable-doc-generation* file)
+				`((let ((,file-sym ,file))
+				    (doc-foreign-struct ',(doc-create-info create-infos name-infos
+									   init-form-infos
+									   no-constructorp
+									   default-createp
+									   invisiblesp)
+							',(doc-destroy-info no-destructorp)
+							',(doc-accessors-info get-infos set-infos
+									      name-infos
+									      default-getp default-setp
+									      invisiblesp)
+							',type-infos ,struct-type ',infix
+							,file-sym)))))))))))

@@ -9,5 +9,6 @@
 	   #:doc-subsubheader
 	   #:doc-note
 	   #:defwith
+	   #:def-foreign-callback-definer
 	   #:def-foreign-function
 	   #:def-foreign-struct))
