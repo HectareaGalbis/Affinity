@@ -100,7 +100,7 @@
   (format file "## ~a~%~%" name))
 
 (defun doc-subsubheader-default (name file)
-  (format file "### ~a~%~%" name))
+  (format file "---~%~%### ~a~%~%" name))
 
 (defun doc-note-default (note file)
   (format file "* **Note**: ~a~%~%" note))
@@ -109,7 +109,7 @@
   (let ((name-str (name-des-string name))
 	(create-str (name-des-string create))
 	(destroy-str (name-des-string destroy)))
-    (format file "**~a**~%```lisp~%(~a var-or-vars (&rest args)~%  &body body)~%```~%"
+    (format file "**~a**~%```lisp~%(~a var (&rest args)~%  &body body)~%```~%"
 	    name-str name-str)
     (format file "Wrap the body expressions with `~a` and `~a`."
 	    create-str destroy-str)
