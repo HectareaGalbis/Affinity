@@ -223,7 +223,8 @@
 	(format file "**Accessors**~%```lisp~%")
 	(iter (for doc-accessor-info in doc-accessors-info)
 	  (destructuring-bind (slot-name rest-parameters setf-ablep) doc-accessor-info
-	    (let ((get-name (concatenate 'string infix-str "-" (name-des-string slot-name))))
+	    (let ((get-name (concatenate 'string infix-str "-" (name-des-string slot-name)))
+		  (*print-case* :downcase))
 	      (format file "(~a obj~{ ~a~})" get-name rest-parameters)
 	      (if setf-ablep
 		  (format file " ; setf-able"))
