@@ -188,9 +188,13 @@
 	   (destructor-str (concatenate 'string "destroy-" infix-str))
 	   (no-destructor-p doc-destroy-info))
       (doc-subsubheader-default type-str file)
-      (let* ((struct-members (union (mapcar #'car constructor-parameters)
-				    (mapcar #'car doc-accessors-info)
-				    :test #'name=)))
+      (let* ((struct-members (iter (for member-type in (cffi:foreign-slot-names (list :struct (name-des-symbol type))))
+			       (let ((constructor-memberp (member member-type constructor-parameters
+								  :key (lambda (x) (name-des-symbol (car x)))))
+				     (accessor-memberp (member member-type doc-accessors-info
+							       :key (lambda (x) (name-des-symbol (car x))))))
+				 (when (or constructor-memberp accessor-memberp)
+				   (collect (or (caar constructor-memberp) (caar accessor-memberp))))))))
 	(when struct-members
 	  (format file "**Members**~%")
 	  (iter (for struct-member in struct-members)
