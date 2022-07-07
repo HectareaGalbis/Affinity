@@ -451,7 +451,6 @@
 	 (return-sym (name-des-symbol (car return-argument)))
 	 (return-expr (cadr return-argument))
 	 (final-return-expr (rec-substitute (list return-sym return-gensym) return-expr)))
-    (print parameter-syms-gensyms)
     `(cffi:defcallback ,name ,return-ftype ,parameter-gensyms-ftypes
        (let ((,return-gensym (let ,syms-final-create-exprs
 			       ,@body)))
