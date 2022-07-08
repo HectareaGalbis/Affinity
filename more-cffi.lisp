@@ -256,6 +256,12 @@
 ;; ----- Documentation functions -----
 ;; -----------------------------------
 
+(defmacro with-doc-file ((file path) &body body)
+  (if *enable-doc-generation*
+      `(with-open-file (,file ,path :direction :output :if-exists :supersede :if-does-not-exist :create)
+	 ,@body)
+      `(progn ,@body)))
+
 (defmacro doc-header (name file)
   (if (and *enable-doc-generation* file)
       `(funcall *doc-header-proc* ,name ,file)))
@@ -606,31 +612,55 @@
 
 (defun check-init-form-option (create-optionp create-option name slot-name)
   (when create-optionp
-    (unless (exists-rec (list (name-des-symbol name)) create-option)
+    (unless (not (null (car create-option)))
       (error "If the name ~a is not used in ~a descriptor, init-form is forbidden."
-	     (name-des-string name) slot-name))))
+	     (name-des-string name) (name-des-string slot-name)))))
 
-(defun check-destroy-option (destroy slots slot-member)
-  (unless (exists-rec slots destroy)
-    (error "Expected the use of at least one slot member in ~a descriptor.~%Found:~%   ~S"
-	   (name-des-string slot-member) destroy)))
+(defun check-create-option (create slot-name)
+  (unless (or (null create)
+	      (and (listp create)
+		   (listp (car create))
+		   (<= (length (car create)) 1)
+		   (symbolp (caar create))
+		   (not (null (cadr create)))))
+    (error "Expected a create expression (([arg]) &body body) in ~a descriptor.~%Found:~%   ~S"
+	   (name-des-string slot-name) create))
+  (unless (or (null (car create))
+	      (not (string= (name-des-string slot-name) (caar create))))
+    (error "The argument ~a must be different of ~a."
+	   (string-downcase (string (car create))) (name-des-string slot-name)))
+  (unless (or (null (car create))
+	      (exists-rec (list (caar create)) (cdr create)))
+    (error "Expected the use of ~a in the create expression of ~a descriptor."
+	   (caar create) (name-des-string slot-name)))
+  (unless (exists-rec (list (name-des-symbol slot-name)) (cdr create))
+    (error "Expected the use of ~a in its create expression." (name-des-string slot-name))))
+
+(defun check-destroy-option (destroy slot-name)
+  (unless (exists-rec (list (name-des-symbol slot-name)) destroy)
+    (error "Expected the use of ~a in its destroy expression." (name-des-string slot-name))))
 
 (defun check-get-option (get slot-name)
   (unless (or (null get)
 	      (and (listp get)
 		   (listp (car get))
 		   (not (null (cadr get)))))
-    (error "Expected a get expression ((&rest args) expr) in the ~a descriptor.~%Found:~%   ~S"
-	   (name-des-string slot-name) get)))
+    (error "Expected a get expression ((&rest args) &body body) in the ~a descriptor.~%Found:~%   ~S"
+	   (name-des-string slot-name) get))
+  (unless (exists-rec (list (name-des-symbol slot-name)) get)
+    (error "Expected the use of ~a in its get expression." (name-des-string slot-name))))
 
 (defun check-set-option (set slot-name)
   (unless (or (null set)
 	      (and (listp set)
 		   (listp (car set))
+		   (not (null (car set)))
 		   (not (null (cadr set)))
 		   (not (member (caar set) '(&optional &key &rest &aux &allow-other-keys)))))
-    (error "Expected a set expression ((new-val &rest args) expr) in the ~a descriptor.~%Found:~%   ~S"
-	   (name-des-string slot-name) set)))
+    (error "Expected a set expression ((new-val &rest args) &body body) in the ~a descriptor.~%Found:~%   ~S"
+	   (name-des-string slot-name) set))
+  (unless (exists-rec (list (name-des-symbol slot-name)) set)
+    (error "Expected the use of ~a in its set expression." (name-des-string slot-name))))
 
 (defun check-slot-descriptor (descriptor slot-names struct-type no-constructor-p no-destructor-p)
   (if (and (listp descriptor) (not (null descriptor)))
@@ -657,8 +687,10 @@
 		      (namep (member :name descriptor))
 		      (name (if namep (cadr namep) (car descriptor))))
 		 (check-init-form-option create-optionp (cadr create-optionp) name (car descriptor))))
+	      ((eq (car rest-descriptor) :create)
+	       (check-create-option (cadr rest-descriptor) (car descriptor)))
 	      ((eq (car rest-descriptor) :destroy)
-	       (check-destroy-option (cadr rest-descriptor) slot-names (car descriptor)))
+	       (check-destroy-option (cadr rest-descriptor) (car descriptor)))
 	      ((eq (car rest-descriptor) :get)
 	       (check-get-option (cadr rest-descriptor) (car descriptor)))
 	      ((eq (car rest-descriptor) :set)
@@ -696,7 +728,7 @@
 	      (destructuring-bind (slot-name-sym invisiblep create createp) create-info
 		(when (and (or enable-invisibles (not invisiblep))
 			   (or enable-default-creates createp))
-		  (when (or (and createp (exists-rec (list slot-name-sym) create))
+		  (when (or (and createp (not (null (car create))))
 			    (not createp))
 		    (let* ((namep (member slot-name-sym name-infos :key #'car))
 			   (keyword-sym (if namep (cadar namep) slot-name-sym))
@@ -739,39 +771,31 @@
 	    (collect slot-name-sym into used-slots))
 	(if createp
 	    (progn
-	      (when (exists-rec (list slot-name-sym) create)
+	      (when (not (null (car create)))
 		(let* ((namep (member slot-name-sym name-infos :key #'car))
 		       (keyword-name (if namep (cadar namep) slot-name-sym))
+		       (arg (caar create))
 		       (init-formp (member slot-name-sym init-form-infos :key #'car))
 		       (init-form (if init-formp (cadar init-formp) 0)))
-		  (collect (list (list (name-des-keyword keyword-name) slot-name-sym) init-form)
-		    into constructor-parameters))
-		(let ((new-sym (gensym)))
-		  (collect new-sym into constructor-syms)
-		  (appending (list slot-name-sym new-sym) into constructor-parameter-syms)))
-	      (let ((new-sym (gensym)))
-		(collect new-sym into let-syms)
-		(collect new-sym into setf-syms))
-	      (collect create into let-exprs))
+		  (collect (list (list (name-des-keyword keyword-name) arg) init-form)
+		    into constructor-parameters)))
+	      (appending (cdr create) into create-expressions))
 	    (progn
 	      (let* ((namep (member slot-name-sym name-infos :key #'car))
 		     (keyword-name (if namep (cadar namep) slot-name-sym))
+		     (arg (gensym))
 		     (init-formp (member slot-name-sym init-form-infos :key #'car))
 		     (init-form (if init-formp (cadar init-formp) 0)))
-		(collect (list (list (name-des-keyword keyword-name) slot-name-sym) init-form)
-		  into constructor-parameters))
-	      (let ((new-sym (gensym)))
-		(appending (list slot-name-sym new-sym) into constructor-parameter-syms)
-		(collect new-sym into setf-syms))))))
+		(collect (list (list (name-des-keyword keyword-name) arg) init-form)
+		  into constructor-parameters)
+		(collect `(setf ,slot-name-sym ,arg) into create-expressions))))))
     (finally (return `(defun ,(intern (concatenate 'string "CREATE-" (string-upcase (name-des-string suffix))))
-			  (&key ,@(rec-substitute constructor-parameter-syms constructor-parameters))
+			  (&key ,@constructor-parameters)
 			,(let ((object-sym (gensym)))
-			   `(let* (,@(mapcar #'list let-syms (rec-substitute constructor-parameter-syms
-									     let-exprs))
-				   (,object-sym (cffi:foreign-alloc '(:struct ,(name-des-symbol struct-type)))))
+			   `(let ((,object-sym (cffi:foreign-alloc '(:struct ,(name-des-symbol struct-type))))				   )
 			      (memset ,object-sym 0 (cffi:foreign-type-size '(:struct ,(name-des-symbol struct-type))))
 			      (cffi:with-foreign-slots (,used-slots ,object-sym (:struct ,(name-des-symbol struct-type)))
-				(setf ,@(apply #'append (mapcar #'list used-slots setf-syms))))
+				,@create-expressions)
 			      (values ,object-sym))))))))
 
 (defun create-destructor-code (destroy-infos pointer-slots struct-type suffix)

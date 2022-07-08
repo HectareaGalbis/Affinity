@@ -4,6 +4,15 @@
   (:use :cl :alexandria :iterate)
   (:nicknames :mcffi)
   (:export #:*enable-doc-generation*
+	   #:*doc-header-proc*
+	   #:*doc-subheader-proc*
+	   #:*doc-subsubheader-proc*
+	   #:*doc-note-proc*
+	   #:*doc-defwith-proc*
+	   #:*doc-foreign-callback-definer-proc*
+	   #:*doc-foreign-function-proc*
+	   #:*doc-foreign-struct-proc*
+	   #:with-doc-file
 	   #:doc-header
 	   #:doc-subheader
 	   #:doc-subsubheader
