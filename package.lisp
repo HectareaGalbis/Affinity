@@ -3,7 +3,8 @@
 (defpackage "more-cffi"
   (:use :cl :alexandria :iterate)
   (:nicknames :mcffi)
-  (:export #:*enable-doc-generation*
+  (:export #:*export-symbols*
+	   #:*doc-generation*
 	   #:*doc-header-proc*
 	   #:*doc-subheader-proc*
 	   #:*doc-subsubheader-proc*

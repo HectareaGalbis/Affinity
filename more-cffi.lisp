@@ -236,11 +236,12 @@
 	(format file "```~%~%")))))
 
 
-;; ----------------------------------------
-;; ----- Documentation global options -----
-;; ----------------------------------------
+;; --------------------------
+;; ----- Global options -----
+;; --------------------------
 
-(defparameter *enable-doc-generation* nil)
+;; Documentation generation
+(defparameter *doc-generation* nil)
 
 (defparameter *doc-header-proc* #'doc-header-default)
 (defparameter *doc-subheader-proc* #'doc-subheader-default)
@@ -252,30 +253,34 @@
 (defparameter *doc-foreign-struct-proc* #'doc-foreign-struct-default)
 
 
+;; Export symbols
+(defparameter *export-symbols* t)
+
+
 ;; -----------------------------------
 ;; ----- Documentation functions -----
 ;; -----------------------------------
 
 (defmacro with-doc-file ((file path) &body body)
-  (if *enable-doc-generation*
+  (if *doc-generation*
       `(with-open-file (,file ,path :direction :output :if-exists :supersede :if-does-not-exist :create)
 	 ,@body)
       `(progn ,@body)))
 
 (defmacro doc-header (name file)
-  (if (and *enable-doc-generation* file)
+  (if (and *doc-generation* file)
       `(funcall *doc-header-proc* ,name ,file)))
 
 (defmacro doc-subheader (name file)
-  (if (and *enable-doc-generation* file)
+  (if (and *doc-generation* file)
       `(funcall *doc-subheader-proc* ,name ,file)))
 
 (defmacro doc-subsubheader (name file)
-  (if (and *enable-doc-generation* file)
+  (if (and *doc-generation* file)
       `(funcall *doc-subsubheader-proc* ,name ,file)))
 
 (defmacro doc-note (name file)
-  (if (and *enable-doc-generation* file)
+  (if (and *doc-generation* file)
       `(funcall *doc-note-proc* ,name ,file)))
 
 (defun doc-defwith (name create destroy file)
@@ -334,23 +339,25 @@
   (when destructor-argumentsp
     (check-destructor-arguments destructor-arguments))
   (with-gensyms ((var "var") (var-list "var-list") (args "args") (ret-list "ret-list") (body "body"))
-    `(progn
-       (defmacro ,(name-des-symbol name) (,var ,args &body ,body)
-	 (with-gensyms ((,ret-list "ret-list"))
-           (let ((,var-list (if (listp ,var)
-				,var
-				(list ,var))))
-             `(let ((,,ret-list (multiple-value-list (,',(name-des-symbol create) ,@,args))))
-		(unwind-protect
-                     (multiple-value-bind ,,var-list (values-list ,,ret-list)
-                       ,@,body)
-                  (apply #',',(name-des-symbol destroy) ,,(if destructor-arguments
-							   ``(loop for index in ',',destructor-arguments
-								   collect (nth index ,,ret-list))
-							   ``(subseq ,,ret-list 0 ,',destructor-arity))))))))
-       ,@(if (and *enable-doc-generation* file)
-	     `((doc-defwith ',name ',create ',destroy ,file))
-	     nil))))
+    (let ((name-sym (name-des-symbol name)))
+      `(progn
+	 (defmacro ,name-sym (,var ,args &body ,body)
+	   (with-gensyms ((,ret-list "ret-list"))
+             (let ((,var-list (if (listp ,var)
+				  ,var
+				  (list ,var))))
+               `(let ((,,ret-list (multiple-value-list (,',(name-des-symbol create) ,@,args))))
+		  (unwind-protect
+                       (multiple-value-bind ,,var-list (values-list ,,ret-list)
+			 ,@,body)
+                    (apply #',',(name-des-symbol destroy) ,,(if destructor-arguments
+								``(loop for index in ',',destructor-arguments
+									collect (nth index ,,ret-list))
+								``(subseq ,,ret-list 0 ,',destructor-arity))))))))
+	 ,@(when *export-symbols*
+	     `((export ',name-sym)))
+	 ,@(when (and *doc-generation* file)
+	     `((doc-defwith ',name ',create ',destroy ,file)))))))
 
 
 ;; ----------------------------------------
@@ -502,10 +509,11 @@
      ,(create-definer-code name
 			   (extract-create-arguments arg-descriptors)
 			   (extract-return-argument arg-descriptors))
-     ,@(if (and *enable-doc-generation* file)
-	   `((doc-foreign-callback-definer ',name ',(extract-doc-create-info arg-descriptors)
-					   ',(extract-doc-return-info arg-descriptors) ,file))
-	   nil)))
+     ,@(when *export-symbols*
+	 `((export ',(name-des-symbol name))))
+     ,@(when (and *doc-generation* file)
+	 `((doc-foreign-callback-definer ',name ',(extract-doc-create-info arg-descriptors)
+					 ',(extract-doc-return-info arg-descriptors) ,file)))))
 
 
 ;; --------------------------------
@@ -568,9 +576,10 @@
 	 (final-body (if (or type-declarations return-declarations) (cdr exprs) exprs)))
     `(progn
        (defun ,(name-des-symbol name) ,args ,@final-body)
-       ,@(if (and *enable-doc-generation* file)
-	     `((doc-foreign-function ',name ',args ',type-declarations ',return-declarations ,file))
-	     nil))))
+       ,@(when *export-symbols*
+	   `((export ',(name-des-symbol name))))
+       ,@(when (and *doc-generation* file)
+	   `((doc-foreign-function ',name ',args ',type-declarations ',return-declarations ,file))))))
 
 
 ;; ------------------------------
@@ -589,9 +598,9 @@
   (unless (listp options)
     (error "Expected a list.~%Found:~%   ~S" options))
   (iter (for option in options)
-    (unless (member option '(:no-constructor :no-destructor :enable-default-get
-			     :enable-default-set :enable-default-create :include-invisibles))
-      (error "Expected :no-constructor, :no-destructor, :enable-default-get, :enable-default-set, :enable-default-create or :include-invisibles.~%Found:~%   ~S"
+    (unless (member option '(:no-constructor :no-destructor :default-get
+			     :default-set :default-create :include-invisibles))
+      (error "Expected :no-constructor, :no-destructor, :default-get, :default-set, :default-create or :include-invisibles.~%Found:~%   ~S"
 	     option))))
 
 (defun check-slot-name (slot-name slot-names struct-type)
@@ -879,9 +888,9 @@
 			  struct-type (member :no-constructor options) (member :no-destructor options))
   (let ((no-constructorp (member :no-constructor options))
 	(no-destructorp  (member :no-destructor options))
-	(default-createp (member :enable-default-create options))
-	(default-getp    (member :enable-default-get options))
-	(default-setp    (member :enable-default-set options))
+	(default-createp (member :default-create options))
+	(default-getp    (member :default-get options))
+	(default-setp    (member :default-set options))
 	(invisiblesp     (member :include-invisibles options)))
     (iter (for slot-name-sym in (cffi:foreign-slot-names (list :struct (name-des-symbol struct-type))))
       (let ((slot-descriptor (car (member slot-name-sym slot-descriptors :key (lambda (x) (if (listp x) (car x) x))))))
@@ -917,9 +926,13 @@
 							     default-createp
 							     invisiblesp
 							     infix)))
+			  ,@(when (and *export-symbols* (not no-constructorp))
+			      `((export ',(intern (concatenate 'string "CREATE-" (string-upcase (name-des-string infix)))))))
 			  ,@(unless no-destructorp
 			      (list (create-destructor-code destroy-infos pointer-slots
 							    struct-type infix)))
+			  ,@(when (and *export-symbols* (not no-destructorp))
+			      `((export ',(intern (concatenate 'string "DESTROY-" (string-upcase (name-des-string infix)))))))
 			  ,@(unless (or no-constructorp
 					no-destructorp)
 			      (list (create-with-code infix)))
@@ -927,8 +940,16 @@
 					      default-getp invisiblesp infix)
 			  ,@(create-set-codes set-infos pointer-slots name-infos struct-type
 					      default-setp invisiblesp infix)
+			  ,@(when *export-symbols*
+			      (let ((slot-names (cffi:foreign-slot-names (list :struct (name-des-symbol struct-type)))))
+				(iter (for slot-name in slot-names)
+				  (let* ((slot-name-sym (name-des-symbol slot-name))
+					 (namep (member slot-name-sym name-infos :key #'car))
+					 (name (if namep (cadar namep) slot-name-sym)))
+				    (collect `(export ',(intern (concatenate 'string (string-upcase (name-des-string infix)) "-"
+									     (string-upcase (name-des-string name))))))))))
 			  ,@(let ((file-sym (gensym)))
-			      (when (and *enable-doc-generation* file)
+			      (when (and *doc-generation* file)
 				`((let ((,file-sym ,file))
 				    (doc-foreign-struct ',(doc-create-info create-infos name-infos
 									   init-form-infos
