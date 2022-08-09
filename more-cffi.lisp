@@ -60,8 +60,8 @@
       (stringp name)))
 
 ;; Return t if two symbols of two name designators are the same
-(defun name= (name1 name2)
-  (eq (name-des-symbol name1) (name-des-symbol name2)))
+;; (defun name= (name1 name2)
+;;   (eq (name-des-symbol name1) (name-des-symbol name2)))
 
 ;; Turn a name designator into a keyword
 (defun name-des-keyword (name)
@@ -137,8 +137,9 @@
   (format file "```lisp~%~{~a~%~}```~%~%"
 	  (mapcar (lambda (x) (list 'defconstant (name-des-string (car x)) (cadr x))) descriptors)))
 
-(defun doc-foreign-callback-definer-default (name create-info return-info file)
-  (let ((name-str (name-des-string name))
+(defun doc-foreign-callback-definer-default (foreign-type name create-info return-info file)
+  (let ((foreign-type-str (name-des-string foreign-type))
+	(name-str (name-des-string name))
 	(args-str (mapcar (lambda (x) (name-des-string (car x))) create-info))
 	(arg-types-str (mapcar (lambda (x) (name-des-string (cadr x))) create-info))
 	(arg-typesp (mapcar #'caddr create-info))
@@ -146,7 +147,7 @@
 	(ret-type-str (name-des-string (cadr return-info)))
 	(ret-typep (caddr return-info)))
     (format file "**~a**~%```lisp~%(~a (~{~a~^ ~})~% &body body) => ~a~%```~%"
-	    name-str name-str args-str ret-arg-str)
+	    foreign-type-str name-str args-str ret-arg-str)
     (format file "Define a callback function.~%~%")
     (when create-info
       (format file "* *Parameters:*~%")
@@ -211,16 +212,16 @@
       (doc-subsubheader-default type-str file)
       (let* ((struct-members (iter (for member-type in (cffi:foreign-slot-names (list struct-or-union (name-des-symbol type))))
 			       (let ((constructor-memberp (member member-type constructor-parameters
-								  :key (lambda (x) (name-des-symbol (car x)))))
+								  :key #'car :test #'string-equal))
 				     (accessor-memberp (member member-type doc-accessors-info
-							       :key (lambda (x) (name-des-symbol (car x))))))
+							       :key #'car :test #'string-equal)))
 				 (when (or constructor-memberp accessor-memberp)
 				   (collect (or (caar constructor-memberp) (caar accessor-memberp))))))))
 	(when struct-members
 	  (format file "**Members**~%")
 	  (iter (for struct-member in struct-members)
 	    (format file "* *~a*" (name-des-string struct-member))
-	    (let ((type-infop (member (name-des-symbol struct-member) type-infos :key #'car)))
+	    (let ((type-infop (member struct-member type-infos :key #'car :test #'string-equal)))
 	      (when type-infop
 		(format file ": `~a`" (type-des-string (cadar type-infop)))))
 	    (format file "~%"))
@@ -287,9 +288,11 @@
 
 (defmacro with-doc-file ((file path) &body body)
   (if *doc-generation*
-      `(with-open-file (,file ,path :direction :output :if-exists :supersede :if-does-not-exist :create)
-	 ,@body)
-      `(progn ,@body)))
+      `(progn
+	 (defparameter ,file (open ,path :direction :output :if-exists :supersede :if-does-not-exist :create))
+	 ,(cons 'progn body)
+	 (close ,file))
+      (cons 'progn body)))
 
 (defmacro doc-header (file name)
   (if (and *doc-generation* file)
@@ -319,11 +322,11 @@
 (defun doc-foreign-enum (name descriptors file)
   (funcall *doc-foreign-enum-proc* name descriptors file))
 
-(defun doc-foreign-callback-definer (name create-info return-info file)
-  (funcall *doc-foreign-callback-definer-proc* name create-info return-info file))
+(defun doc-foreign-callback-definer (foreign-type name create-info return-info file)
+  (funcall *doc-foreign-callback-definer-proc* foreign-type name create-info return-info file))
 
-(defun doc-foreign-function (name args type-decls result-decls file)
-  (funcall *doc-foreign-function-proc* name args type-decls result-decls file))
+(defun doc-foreign-function (foreign-name name args type-decls result-decls file)
+  (funcall *doc-foreign-function-proc* foreign-name name args type-decls result-decls file))
 
 (defun doc-foreign-struct (struct-or-union doc-create-info doc-destroy-info doc-accessors-info type-infos
 			   type infix file)
@@ -447,7 +450,8 @@
   (check-constant-function-name name)
   (check-constant-function-args args)
   `(progn
-     (defmacro ,(name-des-symbol name) ,args ,@body)
+     (eval-when (:compile-toplevel :load-toplevel :execute)
+       (defun ,(name-des-symbol name) ,args ,@body))
      ,@(when *export-symbols*
 	 `((export ',(name-des-symbol name))))
      ,@(when (and *doc-generation* file)
@@ -459,7 +463,7 @@
 ;; ----------------------------
 
 (defun check-enum-name (name)
-  (unless (name-desp name)
+  (unless (name-desp name) 
     (error "Expected a name designator.~%Found:~%   ~s" name)))
 
 (defun check-enum-descriptor (descriptor)
@@ -481,13 +485,17 @@
      ,@(mapcar (lambda (x) (list 'defparameter (name-des-symbol (car x)) (cadr x))) descriptors)
      ,@(when *export-symbols*
 	 (mapcar (lambda (x) `(export ',(name-des-symbol (car x)))) descriptors))
-     ,(when (and *doc-generation* file)
-	`((doc-foreign-enum ',name ',descriptors ,file)))))
+     ,@(when (and *doc-generation* file)
+	 `((doc-foreign-enum ',name ',descriptors ,file)))))
 
 
 ;; ----------------------------------------
 ;; ----- def-foreign-callback-definer -----
 ;; ----------------------------------------
+
+(defun check-definer-foreign-type (foreign-type)
+  (unless (name-desp foreign-type)
+    (error "Expected a name designator.~%Found:~%   ~S" foreign-type)))
 
 (defun check-definer-name (name)
   (unless (name-desp name)
@@ -628,7 +636,7 @@
 	    (return (list (car arg-descriptor) (cadr doc-typep) t))
 	    (return (list (car arg-descriptor) nil nil)))))))
 
-(defmacro def-foreign-callback-definer (file name &body arg-descriptors)
+(defmacro def-foreign-callback-definer (file foreign-type name &body arg-descriptors)
   (check-definer-name name)
   (check-arg-descriptors arg-descriptors)
   `(progn
@@ -638,7 +646,7 @@
      ,@(when *export-symbols*
 	 `((export ',(name-des-symbol name))))
      ,@(when (and *doc-generation* file)
-	 `((doc-foreign-callback-definer ',name ',(extract-doc-create-info arg-descriptors)
+	 `((doc-foreign-callback-definer ',foreign-type ',name ',(extract-doc-create-info arg-descriptors)
 					 ',(extract-doc-return-info arg-descriptors) ,file)))))
 
 
@@ -697,7 +705,7 @@
 (defmacro def-foreign-function (file foreign-name name args &body exprs)
   (check-name foreign-name)
   (check-name name)
-  (check-type-declarations (car exprs) name args)  
+  (check-type-declarations (car exprs) name args)
   (let* ((type-declarations (extract-type-declarations (car exprs)))
 	 (return-declarations (extract-return-declarations (car exprs)))
 	 (final-body (if (or type-declarations return-declarations) (cdr exprs) exprs)))
@@ -1078,7 +1086,7 @@
 			  ,@(let ((file-sym (gensym)))
 			      (when (and *doc-generation* file)
 				`((let ((,file-sym ,file))
-				    (doc-foreign-struct struct-or-union ',(doc-create-info create-infos name-infos
+				    (doc-foreign-struct ,struct-or-union ',(doc-create-info create-infos name-infos
 									   init-form-infos
 									   no-constructorp
 									   default-createp
