@@ -338,8 +338,8 @@
 ;; ----- copy -----
 ;; ----------------
 
-(defun copy (dest src type)
-  (memcpy dest src (cffi:foreign-type-size type)))
+(defun copy (dest src type &optional (count 1))
+  (memcpy dest src (* (cffi:foreign-type-size type) count)))
 
 
 ;; -------------------
@@ -558,8 +558,8 @@
       (when arg-returnp
 	(collect arg-returnp into return-args)))
     (finally (let ((num-return-args (length return-args)))
-	       (unless (= num-return-args 1)
-		 (error "Expected only one return argument. There are ~a:~%   (~{~S~^ ~})"
+	       (unless (<= num-return-args 1)
+		 (error "Expected zero or one return argument. There are ~a:~%   (~{~S~^ ~})"
 			num-return-args return-args))))))
 
 ;; Return a list of lists with two elements
