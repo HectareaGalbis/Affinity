@@ -343,7 +343,26 @@
 
 
 ;; -------------------
-;; ----- defwith -----
+;; ----- defcfun -----
+;; -------------------
+
+(defmacro defcfun ((foreign-name name &optional (funcall-name nil)) return-type &body arguments)
+  (let ((name-args (mapcar #'car arguments))
+	(ordered-args (apply #'append (mapcar (lambda (arg) (list (cadr arg) (car arg))) arguments)))
+	(func-ptr (gensym)))
+    (unless (or name funcall-name)
+      (warn "MORE-CFFI:defcfun : name and funcall-name arguments are both nil"))
+    `(progn
+       ,@(when name
+	   `((defun ,name ,name-args
+	       (cffi:foreign-funcall ,foreign-name ,@ordered-args ,return-type))))
+       ,@(when funcall-name
+	   `((defun ,(intern (concatenate 'string "FUNCALL-" (string name))) ,(cons func-ptr name-args)
+	       (cffi:foreign-funcall-pointer ,func-ptr () ,@ordered-args ,return-type)))))))
+
+
+;; -------------------
+;; ----- defwith -----  
 ;; -------------------
 
 (defun check-defwith-name (name)
@@ -658,6 +677,10 @@
   (unless (name-desp name)
     (error "Expected a name designator.~%Found:~%   ~S" name)))
 
+(defun check-funcall-name (name)
+  (unless (or (not name) (name-desp name))
+    (error "Expected a name designator.~%Found:~%   ~S" name)))
+
 (defun check-type-declarations (decl name args)
   (when (and (listp decl) (string= (string (car decl)) "DECLARE-TYPES"))
     (unless (>= (length decl) 2)
@@ -686,6 +709,13 @@
 		(unless (exists-rec (list sym-sym) args)
 		  (error "There is no symbol ~a in arguments from ~a." sym-sym name))))))))))
 
+(defun check-function-body (foreign-name body)
+  (when foreign-name
+    (let ((foreign-sym (name-des-symbol foreign-name)))
+      (unless (exists-rec (list foreign-sym) body)
+	(error "The foreign function ~s must be used in the body"
+	       foreign-sym)))))
+
 (defun extract-type-declarations (decl)
   (if (string= (string (car decl)) "DECLARE-TYPES")
       (iter outer (for type-decl in (cdr decl))
@@ -702,19 +732,37 @@
 	    (in outer (collect (list var (car type-decl)))))))
       nil))
 
-(defmacro def-foreign-function (file foreign-name name args &body exprs)
+(defmacro def-foreign-function (file (foreign-name name &optional (funcall-name nil)) args &body exprs)
   (check-name foreign-name)
   (check-name name)
+  (check-funcall-name funcall-name)
   (check-type-declarations (car exprs) name args)
   (let* ((type-declarations (extract-type-declarations (car exprs)))
 	 (return-declarations (extract-return-declarations (car exprs)))
+	 (name-sym (when name (name-des-symbol name)))
+	 (foreign-name-sym (when foreign-name (name-des-symbol foreign-name)))
+	 (funcall-name-sym (when funcall-name (name-des-symbol funcall-name)))
+	 (foreign-funcall-name-sym (when foreign-name (intern (concatenate 'string "FUNCALL-"
+									   (string-upcase (name-des-string foreign-name))))))
+	 (func-pointer (gensym))
+	 (macrolet-args (gensym))
 	 (final-body (if (or type-declarations return-declarations) (cdr exprs) exprs)))
     `(progn
-       (defun ,(name-des-symbol name) ,args ,@final-body)
-       ,@(when *export-symbols*
-	   `((export ',(name-des-symbol name))))
-       ,@(when (and *doc-generation* file)
-	   `((doc-foreign-function ',foreign-name ',name ',args ',type-declarations ',return-declarations ,file))))))
+       ,(when name
+	  `(progn
+	     (defun ,name-sym ,args ,@final-body)
+	     ,(when *export-symbols*
+		`(export ',name-sym))))
+       ,(when funcall-name
+	  `(progn
+	     (defun ,funcall-name-sym ,(cons func-pointer args)
+	       (labels ((,foreign-name-sym (&rest ,macrolet-args)
+			    (apply #',foreign-funcall-name-sym ,func-pointer ,macrolet-args)))
+		 ,@final-body))
+	     ,(when *export-symbols*
+		`(export ',funcall-name-sym))))
+       ,(when (and *doc-generation* file)
+	  `(doc-foreign-function ',foreign-name ',name ',args ',type-declarations ',return-declarations ,file)))))
 
 
 ;; ------------------------------

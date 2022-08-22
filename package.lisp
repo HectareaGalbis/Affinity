@@ -22,6 +22,7 @@
 	   #:doc-subsubheader
 	   #:doc-note
 	   #:copy
+	   #:defcfun
 	   #:defwith
 	   #:def-foreign-constant
 	   #:def-foreign-constant-function
