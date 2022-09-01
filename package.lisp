@@ -21,6 +21,8 @@
 	   #:doc-subheader
 	   #:doc-subsubheader
 	   #:doc-note
+	   #:memset
+	   #:memcpy
 	   #:copy
 	   #:defcfun
 	   #:defwith
