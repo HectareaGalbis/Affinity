@@ -346,6 +346,25 @@
 ;; ----- defcfun -----
 ;; -------------------
 
+(defun check-defcfun-foreign-name (foreign-name)
+  (unless (stringp foreign-name)
+    (error "Expected a string. Found: ~s" foreign-name)))
+
+(defun check-defcfun-name (name)
+  (unless (symbolp name)
+    (error "Expected a symbol. Found: ~s" name)))
+
+(defun check-defcfun-funcall-name (funcall-name)
+  (unless (or (null funcall-name) (symbolp funcall-name))
+    (error "Expected nil or symbol. Found: ~s" funcall-name)))
+
+(defun check-defcfun-arguments (arguments)
+  (iter (for argument in arguments)
+    (unless (and (listp argument)
+		 (equal (length argument) 2)
+		 (symbolp (car argument)))
+      (error "Expected a list with a symbol and a foreign type. Found: ~s" argument))))
+
 (defmacro defcfun ((foreign-name name &optional (funcall-name nil)) return-type &body arguments)
   (let ((name-args (mapcar #'car arguments))
 	(ordered-args (apply #'append (mapcar (lambda (arg) (list (cadr arg) (car arg))) arguments)))
@@ -357,7 +376,7 @@
 	   `((defun ,name ,name-args
 	       (cffi:foreign-funcall ,foreign-name ,@ordered-args ,return-type))))
        ,@(when funcall-name
-	   `((defun ,(intern (concatenate 'string "FUNCALL-" (string name))) ,(cons func-ptr name-args)
+	   `((defun ,funcall-name ,(cons func-ptr name-args)
 	       (cffi:foreign-funcall-pointer ,func-ptr () ,@ordered-args ,return-type)))))))
 
 
@@ -468,13 +487,17 @@
   (check-constant-function-foreign-name foreign-name)
   (check-constant-function-name name)
   (check-constant-function-args args)
-  `(progn
-     (eval-when (:compile-toplevel :load-toplevel :execute)
-       (defun ,(name-des-symbol name) ,args ,@body))
-     ,@(when *export-symbols*
-	 `((export ',(name-des-symbol name))))
-     ,@(when (and *doc-generation* file)
-	 `((doc-foreign-constant-function ',foreign-name ',name ',args ,file)))))
+  (let ((args-syms (iter (repeat (length args))
+		     (collect(gensym)))))
+    `(progn
+       (defmacro ,(name-des-symbol name) ,args-syms
+	 (let ((args-macrosyms (mapcar #'list ',args (list ,@args-syms))))
+	   `(symbol-macrolet ,args-macrosyms
+	      ,',@body)))
+       ,@(when *export-symbols*
+	   `((export ',(name-des-symbol name))))
+       ,@(when (and *doc-generation* file)
+	   `((doc-foreign-constant-function ',foreign-name ',name ',args ,file))))))
 
 
 ;; ----------------------------
