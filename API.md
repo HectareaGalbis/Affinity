@@ -83,3 +83,29 @@ First, define a cffi foreign type with name `name` that is equivalent to `:int`.
 
 ### def-foreign-callback-definer
 
+```Lisp
+(def-foreign-callback-definer file foreign-type name arg-descriptors)
+
+file ::= A stream.
+foreign-type ::= A string designator.
+name ::= A string designator.
+arg-descriptors ::= { arg-descriptor }*
+arg-descriptor ::= (arg-name arg-options)
+arg-name ::= A string designator.
+arg-options ::= { arg-types [create-or-return] } | { [create-or-return] arg-types }
+arg-types ::= { :type arg-type :foreign-type foreign-arg-type } | { :foreign-type foreign-arg-type :type arg-type }
+arg-type ::= A lisp form.
+foreign-arg-type ::= A cffi foreign type.
+create-or-return ::= { :create expr } | { :return expr }
+expr ::= A lisp expression.
+```
+
+Define a callback definer. The name `foreign-type` specifies the possible C name of the callback (only used for documentation). The new callback definer will have the name `name`. Each `arg-descriptor` describes a traslation of the args passed to the callback. `foreign-arg-type` is the C type of the argument and `arg-type` is the lisp type (the latter is used only for documentation). With `:create` you are specifying that the argument is being received by the callback and the expression is a C to Lisp traslation (the expression must return the traslated object). All these expressions have access to every argument. The `:return` option can be specified just once. In that case, the `arg-name` is bound to the callback result and the expression must be a Lisp to C traslation (the expression must return the traslated object). `:return` and `:create` cannot appear in the same `arg-descriptor`.
+
+### def-foreign-function
+
+```Lisp
+(def-foreign-function file (foreign-name name [funcall-name]) args exprs)
+
+
+```
