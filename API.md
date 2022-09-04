@@ -3,6 +3,44 @@
 
 ## Macros
 
+### def-lisp-function
+
+```Lisp
+(def-lisp-function file name args body )
+
+file ::= A stream.
+name ::= A name designator.
+args ::= (arg)*
+arg ::= A symbol.
+body ::= { body-expr body } | { type-declaration body-tail }
+body-tail ::= { body-expr }*
+body-expr ::= A Lisp expression.
+type-declaration ::= (declare-types arg-decls [:return return-decls])
+arg-decls ::= (arg-type { arg-name }+)
+arg-type ::= A Lisp form.
+arg-name ::= A string designator.
+return-decls ::= (ret-type { ret-name }+)
+ret-type ::= A lisp form.
+ret-name ::= A string designator.
+```
+
+Same as `defun`, but it must have a `declare-types` expression that contains the types of the received and returned values. That expression does nothing, it is used for documentation. The docstring is used too for documentation.
+
+### def-lisp-macro
+
+```Lisp
+(def-lisp-macro file name args body)
+
+file ::= A stream.
+name ::= A string designator.
+args ::= {arg}*
+arg ::= A symbol.
+body ::= { body-expr }*
+body-expr ::= A Lisp expression.
+```
+
+Same as `defmacro`. It uses the docstring for documentation. 
+
 ### defcfun
 
 ```Lisp
@@ -51,21 +89,6 @@ value ::= A lisp value.
 
 Define a constant using `defparameter` with name `name` and value `value`. The `foreign-name` is used only for documentation and it refers to the foreign constant name. If `file` is not `nil`, this will write a simple description of the defined constant.
 
-### def-foreign-constant-function
-
-```Lisp
-(def-foreign-constant-function file foreign-name name args { body }+)
-
-file ::= A stream.
-foreign-name ::= A string designator.
-name ::= A string designator.
-args ::= ( arg* )
-arg ::= A symbol.
-body ::= A lisp expression.
-```
-
-This macro was created to define simple C macro functions. Define a macro with name `name` that receives the arguments `args`. Each `arg` appearing in the `body` expressions will be substituted by the expression stored in said `arg`. The name `foreign-name` is used only in documentation and it refers to the foreign macro function name. If `file` is not `nil` this will write a description of how the macro looks like. The name of the macro is exported.
-
 ### def-foreign-enum
 
 ```Lisp
@@ -105,7 +128,41 @@ Define a callback definer. The name `foreign-type` specifies the possible C name
 ### def-foreign-function
 
 ```Lisp
-(def-foreign-function file (foreign-name name [funcall-name]) args exprs)
+(def-foreign-function file (foreign-name name [funcall-name]) args body)
 
-
+foreign-name ::= A string designator.
+name ::= A string designator or nil.
+funcall-name ::= A string designator or nil.
+args ::= { arg }*
+arg ::= A symbol.
+body ::= { body-expr body } | { type-declaration body-tail }
+body-expr ::= A Lisp expression.
+type-declaration ::= (declare-types arg-decls [:return return-decls])
+arg-decls ::= (arg-type { arg-name }+)
+arg-type ::= A Lisp form.
+arg-name ::= A string designator.
+return-decls ::= (ret-type { ret-name }+)
+ret-type ::= A lisp form.
+ret-name ::= A string designator.
 ```
+
+If `name` is not `nil`, define a function that must use `foreign-name` and must contain a `declare-types` expression. If `funcall-name` is not `nil`, then another function is defined. This is the same as the former, but accepts as first argument a pointer to the foreign function with name `foreign-name`. The `declare-types` expression does nothing and is used only for documentation. The docstring of the function is used also for documentation.
+
+### def-foreign-macro
+
+```Lisp
+(def-foreign-macro file (foreign-name name) args body)
+
+file ::= A stream.
+foreign-name ::= A string-designator
+name ::= A string designator.
+args ::= {arg}*
+arg ::= A symbol.
+body ::= { body-expr }*
+body-expr ::= A Lisp expression.
+```
+
+Same as `def-lisp-macro` but uses `foreign-name` for documentation.
+
+### def-foreign-struct
+
