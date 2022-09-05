@@ -1,7 +1,7 @@
 
 # Reference API
 
-## Macros
+## Main functionality
 
 ### def-lisp-function
 
@@ -201,4 +201,29 @@ If :no-constructor is used, the constructor will not be defined. If :no-destruct
 
 Each descriptor must start with the name of a foreign struct member. If the member does not belong to `struct-type`, an error is raised unless `:virtual` option is used with a non-nil value. The option `:name` can be used to specify an external name of the struct member. It will be used to create the getter and setter of that member, in addition to use that name as the keyword parameter in the constructor. The `:type` option is used to specify the lisp type of the struct member (used only for documentation). The `:init-form` option specifies the initial value for that struct member in the constructor. The CFFI package doesn't allow the struct assignment by value, so if the member of a struct is another struct, you will need to get its address instead of the member itself. In that case, you need to use the `:pointer` option with a non-nil value. The `:create` option is used to indicate how the struct member must be initialized in the constructor. If you use a symbol as `create-arg`, the constructor will accept an argument with that symbol. Then you must tell how to initialize the struct member using `setf` or whatever you want. All struct members are accessible in the `create-expr`s. Use `:destroy` to specify how a struct member needs to be terminated (useful to free pointers). The `:get` option specifies how a getter for the struct member should work. The `get-lambda-list` can be used to receive additional arguments. All the struct member are accessible from `get-expr`s. The `get-expr`s must return the wanted value. Use `:set` to create a setter traslation. The `set-lambda-list` is like `get-lambda-list`, but it must have a first argument indicating the new value. All struct member are accessible from the `set-expr`s. Lastly, `:virtual` allows you to create 'fake' struct members. They will be accessible from `create-expr`s, `get-expr`s and `set-expr`s.
 
-Some restrictions: The `:virtual` members can't use `:destroy` or `:pointer`. If `:no-constructor` is used you can't use `:create`. If `:no-destructor` is used you can't use `:destroy`. 
+Some restrictions: The `:virtual` members can't use `:destroy` or `:pointer`. If `:no-constructor` is used you can't use `:create`. If `:no-destructor` is used you can't use `:destroy`.
+
+## Documentation
+
+### with-doc-file
+
+```Lisp
+(with-doc-file (file path) body)
+
+file ::= A stream.
+path ::= A string.
+body ::= { body-expr }*
+body-expr ::= A lisp expression.
+```
+
+Puts the `body` expressions into an implicit progn where a parameter named `file` is bound to a file stream whose path is `path`. The output file is created or superseeded.
+
+## Control variables
+
+### *doc-generation*
+
+It controls the documentation generation. When it is equal to `nil`, all the documentation related functions are disabled and the macros listed above will only generate the necessary code. For example, `with-doc-file` will neither open any file nor define a new parameter. The default value is `nil`.
+
+### *export-symbols*
+
+It controls if the symbols defined by the above macros are exported. The default value is `t`.
