@@ -110,7 +110,7 @@
 (defun doc-note-default (note file)
   (format file "* **Note**: ~a~%~%" note))
 
-(defun doc-lisp-function-default (name args docstring arg-declarations return-declarations doc-file)
+(defun doc-lisp-function-default (name args docstring arg-declarations return-declarations file)
   (doc-subheader-default (name-des-string name) file)
   (let* ((name-str (name-des-string name))
 	 (arg-names-sym-str (iter (for arg-decl in arg-declarations)
@@ -147,12 +147,12 @@
 		(name-des-string (car result-decl)) (type-des-string (cadr result-decl)))
 	(finally (format file "~%"))))))
 
-(defun doc-lisp-macro-default (name args docstring doc-file)
+(defun doc-lisp-macro-default (name args docstring file)
   (doc-subheader-default (name-des-string name) file)
   (let ((name-str (name-des-string name)))
     (format file "**~a**~%```lisp~%(~a" name-str name-str)
     (when args
-      (format file "~{ ~a~}" args-str))
+      (format file "~{ ~a~}" (mapcar #'string args)))
     (format file ")")
     (format file "~%")
     (format file "```~%~%")
@@ -247,19 +247,19 @@
 		(name-des-string (car result-decl)) (type-des-string (cadr result-decl)))
 	(finally (format file "~%"))))))
 
-(defun doc-foreign-macro-default (foreign-name name args docstring doc-file)
+(defun doc-foreign-macro-default (foreign-name name args docstring file)
   (doc-subheader-default (name-des-string foreign-name) file)
   (let ((name-str (name-des-string name)))
     (format file "**~a**~%```lisp~%(~a" name-str name-str)
     (when args
-      (format file "~{ ~a~}" args-str))
+      (format file "~{ ~a~}" (mapcar #'string args)))
     (format file ")")
     (format file "~%")
     (format file "```~%~%")
     (when docstring
       (format file "~a~%~%" docstring))))
 
-(defun doc-foreign-struct-default (struct-or-union doc-create-info doc-destroy-info doc-accessors-info type-infos
+(defun doc-foreign-struct-default (struct-or-union doc-create-info doc-destroy-info doc-accessors-info type-infos virtual-slots
 				   type infix file)
   (destructuring-bind (no-constructor-p constructor-parameters) doc-create-info
     (let* ((type-str (name-des-string type))
@@ -268,7 +268,7 @@
 	   (destructor-str (concatenate 'string "destroy-" infix-str))
 	   (no-destructor-p doc-destroy-info))
       (doc-subsubheader-default type-str file)
-      (let* ((struct-members (iter (for member-type in (cffi:foreign-slot-names (list struct-or-union (name-des-symbol type))))
+      (let* ((struct-members (iter (for member-type in (append (cffi:foreign-slot-names (list struct-or-union (name-des-symbol type))) virtual-slots))
 			       (let ((constructor-memberp (member member-type constructor-parameters
 								  :key #'car :test #'string-equal))
 				     (accessor-memberp (member member-type doc-accessors-info
@@ -327,8 +327,8 @@
 (defparameter *doc-subheader-proc* #'doc-subheader-default)
 (defparameter *doc-subsubheader-proc* #'doc-subsubheader-default)
 (defparameter *doc-note-proc* #'doc-note-default)
-(defparameter *doc-lisp-function* #'doc-lisp-function-default)
-(defparameter *doc-lisp-macro* #'doc-lisp-macro-default)
+(defparameter *doc-lisp-function-proc* #'doc-lisp-function-default)
+(defparameter *doc-lisp-macro-proc* #'doc-lisp-macro-default)
 (defparameter *doc-defwith-proc* #'doc-defwith-default)
 (defparameter *doc-foreign-constant-proc* #'doc-foreign-constant-default)
 (defparameter *doc-foreign-enum-proc* #'doc-foreign-enum-default)
@@ -370,11 +370,11 @@
   (if (and *doc-generation* file)
       `(funcall *doc-note-proc* ,name ,file)))
 
-(defun doc-lisp-function (name args docstring arg-declarations return-declarations doc-file)
-  (funcall *doc-lisp-function-proc* name args docstring arg-declarations return-declarations doc-file))
+(defun doc-lisp-function (name args docstring arg-declarations return-declarations file)
+  (funcall *doc-lisp-function-proc* name args docstring arg-declarations return-declarations file))
 
 (defun doc-lisp-macro (name args docstring file)
-  (funcall *doc-lisp-macro-proc* name docstring doc-file))
+  (funcall *doc-lisp-macro-proc* name args docstring file))
 
 (defun doc-defwith (name create destroy file)
   (funcall *doc-defwith-proc* name create destroy file))
@@ -392,7 +392,7 @@
   (funcall *doc-foreign-function-proc* foreign-name name docstring args type-decls result-decls file))
 
 (defun doc-foreign-macro (foreign-name name args docstring file)
-  (funcall *doc-foreign-macro-proc* foreign-name name docstring doc-file))
+  (funcall *doc-foreign-macro-proc* foreign-name name args docstring file))
 
 (defun doc-foreign-struct (struct-or-union doc-create-info doc-destroy-info doc-accessors-info type-infos
 			   type infix file)
@@ -736,7 +736,7 @@
 	((eq (car rest-descriptor) :foreign-type)
 	 (check-arg-foreign-type (cadr rest-descriptor) (car arg-descriptor)))
 	((eq (car rest-descriptor) :create)
-	 (check-arg-create (cadr rest-descriptor) (car arg-descriptor)))
+	 (check-arg-create (cadr rest-descriptor) virtualp (car arg-descriptor)))
 	((eq (car rest-descriptor) :return)
 	 (check-arg-return (cadr rest-descriptor) (car arg-descriptor)))))))
 
@@ -793,14 +793,14 @@
 		    (return-ftype (caddr return-argument))
 		    (callback-args (mapcar (lambda (x) (gensym (string x))) foreign-args))
 		    (lisp-args-callback-args (mapcar #'list lisp-args callback-args))
-		    (callback-create-exprs (mapcar (lambda (x) (rec-substitute lisp-args-callback-args) lisp-create-exprs)))
+		    (callback-create-exprs (mapcar (lambda (x) (rec-substitute lisp-args-callback-args x)) lisp-create-exprs))
 		    (user-lisp-args (gensym))
 		    (callback-let-create-exprs (gensym))
-		    (callback-args-types (mapcar #'list foreign-gensyms foreign-types))
+		    (callback-args-types (mapcar #'list callback-args foreign-types))
 		    (callback-return-sym (gensym))
 		    (lisp-return-expr (cadr return-argument))
 		    (lisp-return-sym (name-des-symbol (car return-argument)))
-		    (callback-return-expr (rec-substitute (list lisp-return-sym callback-return-sym) return-expr)))
+		    (callback-return-expr (rec-substitute (list lisp-return-sym callback-return-sym) lisp-return-expr)))
 	       `(defmacro ,(name-des-symbol name) (,callback-name ,lisp-args &body ,callback-body)
 		  (let* ((,user-lisp-args (cons 'list ',lisp-args))
 			 (,callback-let-create-exprs (mapcar #'list ,user-lisp-args ,callback-create-exprs)))
@@ -811,7 +811,7 @@
 
 (defun extract-doc-create-info (arg-descriptors)
   (iter (for arg-descriptor in arg-descriptors)
-    (when (not (member :return arg-descriptor))
+    (when (and (not (member :return arg-descriptor)) (or (not (member :create arg-descriptor)) (cadr (member :create arg-descriptor))))
       (let ((doc-typep (member :type arg-descriptor)))
 	(if doc-typep
 	    (collect (list (car arg-descriptor) (cadr doc-typep) t))
@@ -845,10 +845,10 @@
 
 (defun check-foreign-function-foreign-name (foreign-name)
   (unless (name-desp foreign-name)
-    (error "Expected a name designator.~%Found:~%   ~s" foreign-name))
+    (error "Expected a name designator.~%Found:~%   ~s" foreign-name)))
 
 (defun check-foreign-function-name (name)
-  (unless (or (not name) (name-desp name)))
+  (unless (or (not name) (name-desp name))
     (error "Expected a name designator.~%Found:~%   ~S" name)))
 
 (defun check-foreign-function-funcall-name (name)
@@ -1087,7 +1087,9 @@
     (error "Expected the use of ~a in its set expression." (name-des-string slot-name))))
 
 (defun check-slot-descriptor (descriptor slot-names struct-type no-constructor-p no-destructor-p)
-  (if (and (listp descriptor) (not (null descriptor)))
+  (unless (not (null descriptor))
+    (error "Expected a non-nil expression."))
+  (if (listp descriptor)
       (progn
 	(check-slot-name (car descriptor) (cadr (member :virtual descriptor)) slot-names struct-type)
 	(when (not (null (cdr descriptor)))
@@ -1125,7 +1127,7 @@
 	       (check-get-option (cadr rest-descriptor) (cadr (member :virtual descriptor)) (car descriptor)))
 	      ((eq (car rest-descriptor) :set)
 	       (check-set-option (cadr rest-descriptor) (cadr (member :virtual descriptor)) (car descriptor)))))))
-      (check-slot-name descriptor slot-names struct-type)))
+      (check-slot-name descriptor nil slot-names struct-type)))
 
 
 (defun check-slot-descriptors (descriptors slot-names struct-type no-constructor-p no-destructor-p)
@@ -1389,7 +1391,7 @@
 									      name-infos
 									      default-getp default-setp
 									      invisiblesp)
-							',type-infos ,struct-type ',infix
+							',type-infos ',virtual-slots ,struct-type ',infix
 							,file-sym)))))))))))
 
 (defmacro def-foreign-struct (file struct-type infix options &body slot-descriptors)
