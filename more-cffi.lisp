@@ -55,9 +55,10 @@
 
 ;; Name designator predicate
 (defun name-desp (name)
-  (or (keywordp name)
-      (symbolp name)
-      (stringp name)))
+  (and (not (null name))
+       (or (keywordp name)
+	   (symbolp name)
+	   (stringp name))))
 
 ;; Return t if two symbols of two name designators are the same
 ;; (defun name= (name1 name2)
@@ -478,7 +479,7 @@
 	 (defun ,(name-des-symbol name) ,args
 	   ,@final-body)
 	 ,@(when *export-symbols*
-	     `((export ,(name-des-symbol name))))
+	     `((export ',(name-des-symbol name))))
 	 ,@(when (and *doc-generation* doc-file)
 	     `((doc-lisp-function ',name ',args ',docstring ',arg-declarations ',return-declarations ,doc-file)))))))
 
@@ -782,17 +783,17 @@
 (defun create-definer-code (name create-arguments return-argument)
   (iter (for arg in create-arguments)
     (when (cadddr (cdr arg))
-      (collect (name-des-symbol arg) into lisp-args))
+      (collect (name-des-symbol (car arg)) into lisp-args))
     (when (cadr arg)
       (collect (cadr arg) into lisp-create-exprs))
     (when (cadddr arg)
-      (collect (name-des-symbol arg) into foreign-args)
+      (collect (name-des-symbol (car arg)) into foreign-args)
       (collect (caddr arg) into foreign-types))
     (finally (let* ((callback-name (gensym))
 		    (callback-body (gensym))
 		    (return-ftype (caddr return-argument))
 		    (callback-args (mapcar (lambda (x) (gensym (string x))) foreign-args))
-		    (lisp-args-callback-args (mapcar #'list lisp-args callback-args))
+		    (lisp-args-callback-args (apply #'append (mapcar #'list lisp-args callback-args)))
 		    (callback-create-exprs (mapcar (lambda (x) (rec-substitute lisp-args-callback-args x)) lisp-create-exprs))
 		    (user-lisp-args (gensym))
 		    (callback-let-create-exprs (gensym))
@@ -801,13 +802,13 @@
 		    (lisp-return-expr (cadr return-argument))
 		    (lisp-return-sym (name-des-symbol (car return-argument)))
 		    (callback-return-expr (rec-substitute (list lisp-return-sym callback-return-sym) lisp-return-expr)))
-	       `(defmacro ,(name-des-symbol name) (,callback-name ,lisp-args &body ,callback-body)
-		  (let* ((,user-lisp-args (cons 'list ',lisp-args))
-			 (,callback-let-create-exprs (mapcar #'list ,user-lisp-args ,callback-create-exprs)))
-		    `(cffi:defcallback ,',callback-name ,',return-ftype ,',callback-args-types
-		       (let ((,',callback-return-sym (let ,,callback-let-create-exprs
-						       ,@,callback-body)))
-			 ,',callback-return-expr))))))))
+	       (return `(defmacro ,(name-des-symbol name) (,callback-name ,lisp-args &body ,callback-body)
+			  (let* ((,user-lisp-args ,(cons 'list lisp-args))
+				 (,callback-let-create-exprs (mapcar #'list ,user-lisp-args ',callback-create-exprs)))
+			    `(cffi:defcallback ,,callback-name ,',return-ftype ,',callback-args-types
+			       (let ((,',callback-return-sym (let ,,callback-let-create-exprs
+							       ,@,callback-body)))
+				 ,',callback-return-expr)))))))))
 
 (defun extract-doc-create-info (arg-descriptors)
   (iter (for arg-descriptor in arg-descriptors)
