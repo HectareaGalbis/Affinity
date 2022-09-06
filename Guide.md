@@ -288,7 +288,7 @@ And finally `def-foreign-function`:
 
 Here I didn't use the `:return` keyword inside `declare-type` because this function returns nothing. Like before, we need to prepare the arguments. The `pallocator` value can be `nil` and we should turn it into a `NULL` pointer. Finally we call the foreign function.
 
-In C creating and destroying things is very common but in Lisp is not usual. For that reason more-cffi exports `defwith`. We can create `with-` macros providing only a constructor and a constructor. When using a `with-` macro we are using the constructor indirectly. In fact, we the arguments we pass to `with-` are passed directly to the constructor. But what happens with the destructor. What arguments will receive? The answer is the values that the constructor returns. Note that `destroy-instance` receives an `instance` and a `pallocator`. This values must be returned by the constructor. And that's why the constructor is returning three values!
+In C creating and destroying things is very common but in Lisp is not usual. For that reason more-cffi exports `defwith`. We can create `with-` macros providing only a constructor and a constructor. When using a `with-` macro we are using the constructor indirectly. In fact, the arguments we pass to `with-` are passed directly to the constructor. But what happens with the destructor? What arguments will receive? The answer is the values that the constructor returns. Note that `destroy-instance` receives an `instance` and a `pallocator`. This values must be returned by the constructor. And that's why the constructor is returning three values!
 
 ```Lisp
 (more-cffi:defwith doc-file with-instance
@@ -297,10 +297,137 @@ In C creating and destroying things is very common but in Lisp is not usual. For
   :destructor-arguments (0 2))
 ```
 
-The second argument is the name of the new `with-` macro. The third and fourth arguments are the constructor and destructor arguments. If we don't specify anything more only the first value returned by the constructor will be received by the destructor. You can specify with `:destructor-arity` the number of values passed to the destructor. Or you can use `:destructor-arguments` to specify what arguments will be passed to the destructor. In this case `destroy-instance` will receive the first and third values returned by `create-instance` (`instance` and `pallocator`). 
+The second argument is the name of the new `with-` macro. The third and fourth arguments are the constructor and destructor respectively. If we don't specify anything more only the first value returned by the constructor will be received by the destructor. You can specify with `:destructor-arity` the number of values passed to the destructor. Or you can use `:destructor-arguments` to specify what arguments will be passed to the destructor. In this case `destroy-instance` will receive the first and third values returned by `create-instance` (`instance` and `pallocator`). 
 
+Before moving on to the next section we are going to see another example. Consider now the next foreign function:
 
+```C
+VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFeatures(
+    VkPhysicalDevice                            physicalDevice,
+    VkPhysicalDeviceFeatures*                   pFeatures);
+```
+
+```Lisp
+(more-cffi:defcfun ("vkGetPhysicalDeviceFeatures" vkgetphysicaldevicefeatures funcall-vkgetphysicaldevicefeatures)
+    :void
+  (physicaldevice vkphysicaldevice)
+  (pfeatures :pointer))
+```
+
+The `pfeatures` argument is an output argument. So like we did before we should return that argument instead of receive it. A naive aproach could be doing the same as the above example:
+
+```Lisp
+(more-cffi:def-foreign-function doc-file ("vkGetPhysicalDeviceFeatures" get-physical-device-features funcall-get-physical-device-features) (physicaldevice)
+  (declare-types ("VkPhysicalDevice" "physicalDevice")
+                 :return ("VkPhysicalDeviceFeatures" pfeatures))
+  (cffi:with-foreign-object (pfeatures '(:struct VkPhysicaDeviceFeatures))
+    (vkgetphysicaldevicefeatures physicaldevice pfeatures)
+    (values pfeatures)))
+```
+
+But this is not correct. We are returning a pointer that is destroyed after leaving the `with-foreign-object` expression. So, we need to explicitly allocate the object:
+
+```Lisp
+(more-cffi:def-foreign-function doc-file ("vkGetPhysicalDeviceFeatures" create-get-physical-device-features funcall-get-physical-device-features) (physicaldevice)
+  (declare-types ("VkPhysicalDevice" "physicalDevice")
+                 :return ("VkPhysicalDeviceFeatures" pfeatures))
+  (let ((pfeatures (cffi:foreign-alloc '(:struct VkPhysicaDeviceFeatures))))
+    (vkgetphysicaldevicefeatures physicaldevice pfeatures)
+    (values pfeatures)))
+```
+
+See that we are using now `foreign-alloc`. But now the pointer can't be freed. Sadly the only solution is telling to the user to free the object themself. I predicted this and I changed already the name of the function. See above that the name of the lisp function is `create-get-physical-device-features`. Let's write the `destroy` counterpart:
+
+```Lisp
+(more-cffi:def-lisp-function doc-file destroy-get-physical-device-features (pfeatures)
+  (declare-types ("VkPhysicalDeviceFeatures" "pFeatures"))
+  (cffi-sys:foreign-free pfeatures))
+```
+
+This function doesn't wrap any foreign function so we need to use `def-lisp-function`. And finally if we have both `create` and `destroy` functions we should create a `with-` macro too:
+
+```Lisp
+(more-cffi:defwith doc-file with-get-physical-device-features
+  create-get-physical-device-features
+  destroy-get-physical-device-features)
+```
 
 ## Dealing with callbacks
 
+Defining callback can be done using `cffi:defcallback`. But we will go a step further because we are going to define a callback definer. In other words, we will define a definer so the user can define their own callbacks. To do that we need to use `def-foreign-callback-definer`. Vulkan has, I think, eight different callback functions. Here is the signature of one of them:
+
+```C
+typedef VkBool32 (VKAPI_PTR *PFN_vkDebugUtilsMessengerCallbackEXT)(
+    VkDebugUtilsMessageSeverityFlagBitsEXT           messageSeverity,
+    VkDebugUtilsMessageTypeFlagsEXT                  messageTypes,
+    const VkDebugUtilsMessengerCallbackDataEXT*      pCallbackData,
+    void*                                            pUserData);
+```
+
+It is a difficult one because the callback can receive user data. Let's see how the use of `def-foreign-callback-definer` looks like:
+
+```Lisp
+(more-cffi:def-foreign-callback-definer doc-file "PFN_vkDebugUtilsMessengerCallbackEXT" def-debug-utils-messenger-callback-ext-callback
+    ("messageSeverity" :type         "VkDebugUtilsMessageSeverityFlagBitsEXT"
+                       :foreign-type vkdebugutilsmessageseverityflagbitsext)
+    ("messageTypes"    :type         vkdebugutilsmessagetypeflagsext
+                       :foreign-type vkdebugutilsmessagetypeflagsext)
+    ("pCallbackData"   :type         "VkDebugUtilsMessengerCallbackDataEXT"
+                       :foreign-type :pointer)
+    ("pUserData"       :type         "lisp object"
+                       :foreign-type :pointer
+		       :create       (gethash (cffi-sys:pointer-address puserdata) *debug-utils-messenger-callback-user-data*))
+    (result            :type         boolean
+                       :foreign-type vkbool32
+	               :return       (if (null result)
+                                         vk_false
+                                         vk_true)))
+```
+
+Wait a moment... This doesn't look like a callback or a function. Of course not, you are not defining a callback but a callback definer. Here we are writing how to traslate the arguments from the C side to the Lisp side, and the result from the Lisp side to the C side. But let's begin at the top. The second argument is the foreign name or type that represents the callback. It is used only for documentation. The next argument is the name of the new callback definer. Now we have a bunch of lists. Each list starts with the name of a callback parameter. After this name we need to use the different options available to tell the definer how to traslate the arguments or the results. The argument `messageSeverity` is an enumeration type. Specifically, it is of type `vkdebugutilsmessageseverityflagbitsext`. We need to tell the foreign type of the arguments using the option `:foreign-type`. The option `:type` is usefull to tell the user what will be the Lisp type of the argument. This is used only for documentation. The next argument, `messageTypes` is also an enumeration so is similar to the previous one. The third argument `pCallbackData` is a struct type and it is correct to receive the raw pointer (we will see in 'Dealing with structs' that the user will not note that they is using pointers). The fourth argument is a pointer to C data. However, the callback should receive just Lisp data. In order to achieve this I'm using a hash table where I store the user data. More specifically, `pUserData` is a pointer but a pointer is only an integer (more or less). CFFI exports the functions `make-pointer` and `pointer-address`. They turn integers and pointers into pointers and integers respectively. In this example `pUserData` is a pointer but here the important thing is the address itself. We use the `:create` option to indicate a special traslation. We use `pointer-addres` to turn the pointer into an integer that is a key in the hash table. Then the `gethash` function returns the user data. Lastly, we indicate that the callback will return a value named `result`. To indicate that this is indeed a returned value we need to use the `:return` option specifying the special traslation. 
+
+For completion we can see where and how the user data is stored:
+
+```Lisp
+(more-cffi:def-foreign-struct doc-file "VkDebugUtilsMessengerCreateInfoEXT" (debug-utils-messenger-create-info-ext)
+    (:default-create :default-get :default-set)
+      
+    ...
+    
+    (puserdata :name "pUserData" :type "lisp object" :init-form nil
+               :create ((puserdata-arg)
+                        (setf puserdata
+                              (if puserdata-arg
+                                 (prog2
+                                     (setf (gethash
+                                            *debug-utils-messenger-callback-next-address*
+                                            *debug-utils-messenger-callback-user-data*)
+                                             puserdata-arg)
+                                     (cffi-sys:make-pointer
+                                      *debug-utils-messenger-callback-next-address*)
+                                   (setf *debug-utils-messenger-callback-next-address*
+                                           (1+
+                                            *debug-utils-messenger-callback-next-address*)))
+                                 (cffi-sys:null-pointer))))
+     ...
+
+  )
+```
+
+This is a portion of a struct definition where the user data is stored. I'm going to extract only the necessary:
+
+```Lisp
+(setf (gethash *debug-utils-messenger-callback-next-address* *debug-utils-messenger-callback-user-data*)
+      puserdata-arg)
+(cffi-sys:make-pointer *debug-utils-messenger-callback-next-address*)
+(setf *debug-utils-messenger-callback-next-address*
+      (1+ *debug-utils-messenger-callback-next-address*))
+```
+
+The `*debug-utils-messenger-callback-next-address*` stores the next available key. It is just an increasing counter. Using this address as a key we store the user data stored in `puserdata-arg`. The `make-pointer` function is used to turn the key into a pointer and this is the value returned. But before that, the last `setf` increase the address counter.
+
+The `def-foreign-callback-definer` has more power than the showed here. You can create fake arguments using the `:virtual` option. It is useful when receiven an array and its size. You can use both arguments to create a list and store it in the fake argument. The user will receive the fake argument instead of the array and its size.
+
 ## Dealing with structs
+
+
