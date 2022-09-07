@@ -396,9 +396,9 @@
   (funcall *doc-foreign-macro-proc* foreign-name name args docstring file))
 
 (defun doc-foreign-struct (struct-or-union doc-create-info doc-destroy-info doc-accessors-info type-infos
-			   type infix file)
+			   virtual-slots type infix file)
   (funcall *doc-foreign-struct-proc* struct-or-union doc-create-info doc-destroy-info doc-accessors-info
-	   type-infos type infix file))
+	   type-infos virtual-slots type infix file))
 
 
 ;; -----------------------------
@@ -1058,7 +1058,7 @@
 	      (exists-rec (list (caar create)) (cdr create)))
     (error "Expected the use of ~a in the create expression of ~a descriptor."
 	   (caar create) (name-des-string slot-name)))
-  (unless (or virtualp (exists-rec (list (name-des-symbol slot-name)) (cdr create)))
+  (unless (or virtualp (null create) (exists-rec (list (name-des-symbol slot-name)) (cdr create)))
     (error "Expected the use of ~a in its create expression." (name-des-string slot-name))))
 
 (defun check-destroy-option (destroy slot-name)
@@ -1072,7 +1072,7 @@
 		   (not (null (cadr get)))))
     (error "Expected a get expression ((&rest args) &body body) in the ~a descriptor.~%Found:~%   ~S"
 	   (name-des-string slot-name) get))
-  (unless (or virtualp (exists-rec (list (name-des-symbol slot-name)) get))
+  (unless (or virtualp (null get) (exists-rec (list (name-des-symbol slot-name)) get))
     (error "Expected the use of ~a in its get expression." (name-des-string slot-name))))
 
 (defun check-set-option (set virtualp slot-name)
@@ -1084,7 +1084,7 @@
 		   (not (member (caar set) '(&optional &key &rest &aux &allow-other-keys)))))
     (error "Expected a set expression ((new-val &rest args) &body body) in the ~a descriptor.~%Found:~%   ~S"
 	   (name-des-string slot-name) set))
-  (unless (or virtualp (exists-rec (list (name-des-symbol slot-name)) set))
+  (unless (or virtualp (null set) (exists-rec (list (name-des-symbol slot-name)) set))
     (error "Expected the use of ~a in its set expression." (name-des-string slot-name))))
 
 (defun check-slot-descriptor (descriptor slot-names struct-type no-constructor-p no-destructor-p)
@@ -1193,51 +1193,56 @@
 		   (name (if namep (cadar namep) get-slot-name-sym)))
 	      (collect (list name (if get-expr-p (car get-expr) nil) setf-ablep)))))))))
 
-(defun create-constructor-code (struct-or-union create-infos pointer-slots virtual-slots name-infos init-form-infos struct-type
+(defun create-constructor-code (struct-or-union create-infos pointer-slots name-infos init-form-infos struct-type
 				enable-default-creates enable-invisibles suffix)
-  (iter (for create-info in create-infos)
-    (destructuring-bind (slot-name-sym invisiblep create createp) create-info
-      (when (and (or enable-invisibles (not invisiblep))
-		 (or create (and enable-default-creates (not createp))))
-	(when (not (member slot-name-sym virtual-slots))
-	  (if (member slot-name-sym pointer-slots)
-	      (collect (list :pointer slot-name-sym) into final-used-slots)
-	      (collect slot-name-sym into final-used-slots)))
-	(if createp
-	    (progn
-	      (when (not (null (car create)))
+  (let ((slot-names (cffi:foreign-slot-names (list struct-or-union (name-des-symbol struct-type)))))
+    (iter (for create-info in create-infos)
+      (destructuring-bind (slot-name-sym invisiblep create createp) create-info
+	(when create
+	  (unioning (find-slot-names slot-names (cdr create)) into used-slots))
+	(when (and enable-default-creates (not createp))
+	  (collect slot-name-sym into used-slots))
+	(when (and (or enable-invisibles (not invisiblep))
+		   (or create (and enable-default-creates (not createp))))
+	  (if createp
+	      (progn
+		(when (not (null (car create)))
+		  (let* ((namep (member slot-name-sym name-infos :key #'car))
+			 (keyword-name (if namep (cadar namep) slot-name-sym))
+			 (arg (caar create))
+			 (init-formp (member slot-name-sym init-form-infos :key #'car))
+			 (init-form (if init-formp (cadar init-formp) 0))
+			 (supplied-var (when (eq struct-or-union :union) (gensym))))
+		    (collect `((,(name-des-keyword keyword-name) ,arg) ,init-form ,@(when (eq struct-or-union :union) `(,supplied-var)))
+		      into constructor-parameters)
+		    (if (eq struct-or-union :union)
+			(collect `(when ,supplied-var ,@(cdr create)) into create-expressions)
+			(appending (cdr create) into create-expressions)))))
+	      (progn
 		(let* ((namep (member slot-name-sym name-infos :key #'car))
 		       (keyword-name (if namep (cadar namep) slot-name-sym))
-		       (arg (caar create))
+		       (arg (gensym))
 		       (init-formp (member slot-name-sym init-form-infos :key #'car))
 		       (init-form (if init-formp (cadar init-formp) 0))
 		       (supplied-var (when (eq struct-or-union :union) (gensym))))
 		  (collect `((,(name-des-keyword keyword-name) ,arg) ,init-form ,@(when (eq struct-or-union :union) `(,supplied-var)))
 		    into constructor-parameters)
-		  (if (eq struct-or-union :union)
-		      (collect `(when ,supplied-var ,@(cdr create)) into create-expressions)
-		      (appending (cdr create) into create-expressions)))))
-	    (progn
-	      (let* ((namep (member slot-name-sym name-infos :key #'car))
-		     (keyword-name (if namep (cadar namep) slot-name-sym))
-		     (arg (gensym))
-		     (init-formp (member slot-name-sym init-form-infos :key #'car))
-		     (init-form (if init-formp (cadar init-formp) 0))
-		     (supplied-var (when (eq struct-or-union :union) (gensym))))
-		(collect `((,(name-des-keyword keyword-name) ,arg) ,init-form ,@(when (eq struct-or-union :union) `(,supplied-var)))
-		  into constructor-parameters)
-		(collect (if (eq struct-or-union :union)
-			     `(when ,supplied-var (setf ,slot-name-sym ,arg))
-			     `(setf ,slot-name-sym ,arg))
-		  into create-expressions))))))
-    (finally (return `(defun ,(intern (concatenate 'string "CREATE-" (string-upcase (name-des-string suffix))))
-			  (&key ,@constructor-parameters)
-			,(let ((object-sym (gensym)))
-			   `(let ((,object-sym (cffi:foreign-alloc '(,struct-or-union ,(name-des-symbol struct-type)))))
-			      (memset ,object-sym 0 (cffi:foreign-type-size '(,struct-or-union ,(name-des-symbol struct-type))))
-			      (cffi:with-foreign-slots (,final-used-slots ,object-sym (,struct-or-union ,(name-des-symbol struct-type)))
-				,@create-expressions)
-			      (values ,object-sym))))))))
+		  (collect (if (eq struct-or-union :union)
+			       `(when ,supplied-var (setf ,slot-name-sym ,arg))
+			       `(setf ,slot-name-sym ,arg))
+		    into create-expressions))))))
+      (finally (return (let ((final-used-slots (mapcar (lambda (x) (if (member x pointer-slots)
+								       (list :pointer x)
+								       x))
+						       used-slots)))
+			 `(defun ,(intern (concatenate 'string "CREATE-" (string-upcase (name-des-string suffix))))
+			      (&key ,@constructor-parameters)
+			    ,(let ((object-sym (gensym)))
+			       `(let ((,object-sym (cffi:foreign-alloc '(,struct-or-union ,(name-des-symbol struct-type)))))
+				  (memset ,object-sym 0 (cffi:foreign-type-size '(,struct-or-union ,(name-des-symbol struct-type))))
+				  (cffi:with-foreign-slots (,final-used-slots ,object-sym (,struct-or-union ,(name-des-symbol struct-type)))
+				    ,@create-expressions)
+				  (values ,object-sym))))))))))
 
 (defun create-destructor-code (struct-or-union destroy-infos pointer-slots struct-type suffix)
   (let ((slot-names (cffi:foreign-slot-names (list struct-or-union (name-des-symbol struct-type)))))
@@ -1352,7 +1357,7 @@
 	(collect (extract-descriptor-info slot-name-sym slot-descriptor :set)         into set-infos))
       (finally (return `(progn
 			  ,@(unless no-constructorp
-			      (list (create-constructor-code struct-or-union create-infos pointer-slots virtual-slots name-infos
+			      (list (create-constructor-code struct-or-union create-infos pointer-slots name-infos
 							     init-form-infos struct-type
 							     default-createp
 							     invisiblesp

@@ -430,3 +430,272 @@ The `def-foreign-callback-definer` has more power than the showed here. You can 
 
 ## Dealing with structs
 
+Wrapping structs consists in defining translations for each of its members. We will see a couple of examples so you can have a good understanding on how more-cffi deals with struct definitions. The macro that more-cffi exports for this is `def-foreign-struct` or `def-foreign-union` (they work the same). Consider this foreign struct already defined using CFFI:
+
+```C
+typedef struct VkFramebufferCreateInfo {
+    VkStructureType             sType;
+    const void*                 pNext;
+    VkFramebufferCreateFlags    flags;
+    VkRenderPass                renderPass;
+    uint32_t                    attachmentCount;
+    const VkImageView*          pAttachments;
+    uint32_t                    width;
+    uint32_t                    height;
+    uint32_t                    layers;
+} VkFramebufferCreateInfo;
+```
+
+```Lisp
+(cffi:defcstruct vkframebuffercreateinfo
+  (stype vkstructuretype)
+  (pnext :pointer)
+  (flags vkframebuffercreateflags)
+  (renderpass vkrenderpass)
+  (attachmentcount :uint32)
+  (pattachments :pointer)
+  (width :uint32)
+  (height :uint32)
+  (layers :uint32))
+```
+
+And let's begin defining the member translations:
+
+```Lisp
+(mcffi:def-foreign-struct doc-file "VkFramebufferCreateInfo" framebuffer-create-info
+   ( #| Options here... |# )
+  ;; Member translation here...
+)
+```
+
+As always the first argument is the stream where to write the documentation. The second argument must be a string designator with the foreign name of the struct. The third argument is the name that will be used to define the constructor, destructor, with macro, getters and setters. The fourth argument is a list of options that can modify the behaviour of `def-foreign-struct`. We will see it a bit later.
+
+The `stype` member is of type `VkStructureType` that is just an enumeration (:int). We can start telling to `def-foreign-struct` that we have said member:
+
+```Lisp
+(mcffi:def-foreign-struct doc-file "VkFramebufferCreateInfo" framebuffer-create-info
+   ()
+  (stype :type "VkStructureType"))
+```
+
+This macro is similar to `def-foreign-callback-definer`. For each member we specify how it is and how it must be translated using member options. The `:type` option indicates the lisp type and is used only for documentation. We can change the name of the member using `:name`. We can also use this option with a string to print the name in documentation using a wanted case:
+
+```Lisp
+(mcffi:def-foreign-struct doc-file "VkFramebufferCreateInfo" framebuffer-create-info
+   ()
+  (stype :name "sType" :type "VkStructureType"))
+```
+
+Now I'm going to use `:init-form` to specify its initial value. If not used the default init value is `0`. In Vulkan each `sType` has only one possible value describing the structure itself. In this case the value must be `VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO`:
+
+```Lisp
+(mcffi:def-foreign-struct doc-file "VkFramebufferCreateInfo" framebuffer-create-info
+   ()
+  (stype :name "sType" :type "VkStructureType" :init-form VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO))
+```
+
+Now it is time to define the translations. Usually we will need to specify how to initialize the member in the constructor, how to destroy it, how to get it, and how to change its value. This can be done with `:create`, `:destroy`, `:get` and `:set` options. The `:create` option must have the form `((argument-name) &rest create-exprs)`:
+
+```Lisp
+(mcffi:def-foreign-struct doc-file "VkFramebufferCreateInfo" framebuffer-create-info
+   ()
+  (stype :name "sType" :type "VkStructureType" :init-form VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
+         :create ((sType-arg)
+	          (setf sType sType-arg))))
+```
+
+The member and the received value are `:int` so no special translation is needed. We just do an assignment. Note that inside `create-exprs` we can use `stype` (actually, all members are accessible). We don't need to destroy the member because is just an `:int`. The `:get` and `:set` options are similar to `:create`:
+
+```Lisp
+(mcffi:def-foreign-struct doc-file "VkFramebufferCreateInfo" framebuffer-create-info
+   ()
+  (stype :name "sType" :type "VkStructureType" :init-form VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
+         :create ((stype-arg)
+	          (setf stype stype-arg))
+         :get (()
+	       stype)
+	 :set ((new-value)
+	       (setf stype new-value))))
+```
+
+The syntaxes of `:get` and `:set` are similar to `:create` but actually they can accept more arguments. The syntax of `:get` and `:set` is `(lambda-list &rest get-or-set-exprs)`. The only difference is that the lambda list from `:set` must accept a first argument being non-optional and non-keyword. Having members that does not require any special translation is so common that you can get rid of these if you use the global options `:default-create`, `:default-get` and `:default-set`:
+
+```Lisp
+(mcffi:def-foreign-struct doc-file "VkFramebufferCreateInfo" framebuffer-create-info
+   (:default-create :default-get :default-set)
+  (stype :name "sType" :type "VkStructureType" :init-form VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO))
+```
+
+The members `flags`, `attachmentcount`, `width`, `height` and `layers` don't require any special translation neither:
+
+```Lisp
+(mcffi:def-foreign-struct doc-file "VkFramebufferCreateInfo" framebuffer-create-info
+   (:default-create :default-get :default-set)
+  (stype :name "sType" :type "VkStructureType" :init-form VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO)
+  (flags :type "VkFramebufferCreateFlags")
+  (attachmentcount :name "attachmentCount" :type uint32)
+  (width :type uint32)
+  (height :type uint32)
+  (layers :type uint32))
+```
+
+Now look at `pnext`. It is of type `:pointer` to `:void`. The problem with this member is that it can be a `NULL` pointer. So we need to handle when a `nil` value is received:
+
+```Lisp
+(mcffi:def-foreign-struct doc-file "VkFramebufferCreateInfo" framebuffer-create-info
+   (:default-create :default-get :default-set)
+  ...
+  (pnext :name "pNext" :type "Vulkan object" :init-form nil
+         :create ((pnext-arg)
+	          (setf pnext (or pnext-arg (cffi:null-pointer))))
+         :get (()
+	       (if (cffi:null-pointer-p pnext)
+	           nil
+		   pnext))
+         :set ((new-value)
+	       (setf pnext (or new-value (cffi:null-pointer)))))
+  ...)
+```
+
+In the `:create` expression we are turning the received value into a `NULL` pointer if it is `nil`. In the `:get` expression we are doing the reverse operation. The `:set` expression is the same as `:create`. The `:destroy` is not needed because we didn't allocate anything.
+
+The `renderpass` argument is a pointer but must be a non-`NULL` pointer, so it can be defined as the rest of primitive type members:
+
+```Lisp
+(mcffi:def-foreign-struct doc-file "VkFramebufferCreateInfo" framebuffer-create-info
+   (:default-create :default-get :default-set)
+  ...
+  (renderpass :name "renderPass" :type "VkRenderPass")
+  ...)
+```
+
+The remaining argument `pattachments` is an array of size `attachmentcount`. In this example I will use lists as the Lisp type counterpart of C arrays. So the received value of this member is a list and we need to turn it to an array:
+
+```Lisp
+(mcffi:def-foreign-struct doc-file "VkFramebufferCreateInfo" framebuffer-create-info
+   (:default-create :default-get :default-set)
+  ...
+  (attachmentcount :name "attachmentCount" :type uint32)
+  (pattachments :name "pAttachments" :type (list "VkImageView") :init-form nil  
+                :create ((pattachments-arg)
+		         (setf pattachments (cffi:foreign-alloc 'VkImageView :count attachmentcount))  ; VkImageView == :pointer
+			 (loop for i from 0 below attachmentcount
+			       for attachment in pattachments-arg
+			       do (mcffi:memcpy (cffi:mem-aptr pattachments i) attachment (cffi:foreign-type-size 'VkImage)))))  
+  ...)
+```
+
+Note that we are using `attachmentcount`. But you need to be careful. This can be done because the member `attachmentcount` is defined earlier and it is initialized before `pattachments` begins its initialization. Another option could be using the `:create` option with `attachmentcount` and use its argument name. In other words, inside every `:create` expression we have access to all members and all `:create` arguments. We did an allocation so the array must be destroyed in a `:destroy` option:
+
+```Lisp
+(mcffi:def-foreign-struct doc-file "VkFramebufferCreateInfo" framebuffer-create-info
+   (:default-create :default-get :default-set)
+  ...
+  (attachmentcount :name "attachmentCount" :type uint32)
+  (pattachments :name "pAttachments" :type (list "VkImageView") :init-form nil  
+                :create ((pattachments-arg)
+		         (setf pattachments (cffi:foreign-alloc 'VkImageView :count attachmentcount)) 
+			 (loop for i from 0 below attachmentcount
+			       for attachment in pattachments-arg
+			       do (mcffi:memcpy (cffi:mem-aptr pattachments i) attachment (cffi:foreign-type-size 'VkImage))))
+	        :destroy (cffi:foreign-free pattachments))  
+  ...)
+```
+
+The `:destroy` option only accepts a Lisp expression. Now we can make the getter of this member:
+
+```Lisp
+(mcffi:def-foreign-struct doc-file "VkFramebufferCreateInfo" framebuffer-create-info
+   (:default-create :default-get :default-set)
+  ...
+  (attachmentcount :name "attachmentCount" :type uint32)
+  (pattachments :name "pAttachments" :type (list "VkImageView") :init-form nil  
+                :create ((pattachments-arg)
+		         (setf pattachments (cffi:foreign-alloc 'VkImageView :count attachmentcount)) 
+			 (loop for i from 0 below attachmentcount
+			       for attachment in pattachments-arg
+			       do (mcffi:memcpy (cffi:mem-aptr pattachments i) attachment (cffi:foreign-type-size 'VkImage))))
+	        :destroy (cffi:foreign-free pattachments)
+		:get ((&optional (index nil))
+		      (if index
+		          (cffi:mem-aptr pattachments 'VkImageView index)
+			  (loop for i from 0 below attachmentcount
+			        collect (cffi:mem-aptr pattachments 'VkImageView i)))))  
+  ...)
+```
+
+Note that I used an optional argument named `index`. If the user use an index it will receive directly an element of `pattachments`. Otherwise it will receive a list. Finally we can make the setter:
+
+```Lisp
+(mcffi:def-foreign-struct doc-file "VkFramebufferCreateInfo" framebuffer-create-info
+   (:default-create :default-get :default-set)
+  ...
+  (attachmentcount :name "attachmentCount" :type uint32)
+  (pattachments :name "pAttachments" :type (list "VkImageView") :init-form nil  
+                :create ((pattachments-arg)
+		         (setf pattachments (cffi:foreign-alloc 'VkImageView :count attachmentcount))
+			 (loop for i from 0 below attachmentcount
+			       for attachment in pattachments-arg
+			       do (mcffi:memcpy (cffi:mem-aptr pattachments i) attachment (cffi:foreign-type-size 'VkImage))))
+	        :destroy (cffi:foreign-free pattachments)
+		:get ((&optional (index nil))
+		      (if index
+		          (cffi:mem-aptr pattachments 'VkImageView index)
+			  (loop for i from 0 below attachmentcount
+			        collect (cffi:mem-aptr pattachments 'VkImageView i))))
+		:set ((new-value &optional (index nil))
+		      (if index
+		          (mcffi:memcpy (cffi:mem-aptr pattachments 'VkImageView index) new-value (cffi:foreign-type-size 'VkImageView))
+			  (loop for i from 0 below attachmentcount
+			        for attachment in new-value
+				do (mcffi:memcpy (cffi:mem-aptr pattachments 'VkImageView i) attachment (cffi:foreign-type-size 'VkImageView))))))  
+  ...)
+```
+
+The struct can now be considered finished but it can be better. The member `pattachments` depends on `attachmentcount` and both are controlled by the user. Also, when receiving the list we can set `attachmentcount` to its size so the user doesn't need to deal with this member. I'm going to make some changes:
+
+```Lisp
+(mcffi:def-foreign-struct doc-file "VkFramebufferCreateInfo" framebuffer-create-info
+   (:default-create :default-get :default-set)
+  ...
+  (attachmentcount :name "attachmentCount" :type uint32
+                   :create nil)
+  ...)
+```
+
+Using a `nil` at `:create` indicates that we don't want any translation nor any contructor argument. Same occurs when using `nil` at `:set`. We are going to handle its value from the `pattachments` translations:
+
+```Lisp
+(mcffi:def-foreign-struct doc-file "VkFramebufferCreateInfo" framebuffer-create-info
+   (:default-create :default-get :default-set)
+  ...
+  (attachmentcount :name "attachmentCount" :type uint32
+                   :create nil
+		   :set nil)
+  (pattachments :name "pAttachments" :type (list "VkImageView") :init-form nil  
+                :create ((pattachments-arg)
+			 (setf attachmentcount (length pattachments-arg))
+		         (setf pattachments (cffi:foreign-alloc 'VkImageView :count attachmentcount))
+			 (loop for i from 0 below attachmentcount
+			       for attachment in pattachments-arg
+			       do (mcffi:memcpy (cffi:mem-aptr pattachments i) attachment (cffi:foreign-type-size 'VkImage))))
+	        :destroy (cffi:foreign-free pattachments)
+		:get ((&optional (index nil))
+		      (if index
+		          (cffi:mem-aptr pattachments 'VkImageView index)
+			  (loop for i from 0 below attachmentcount
+			        collect (cffi:mem-aptr pattachments 'VkImageView i))))
+		:set ((new-value &optional (index nil))
+		      (if index
+		          (mcffi:memcpy (cffi:mem-aptr pattachments 'VkImageView index) new-value (cffi:foreign-type-size 'VkImageView))
+			  (progn
+                            (cffi:foreign-free pattachments)
+			    (setf attachmentcount (length new-value))
+			    (setf pattachments (cffi:foreign-alloc 'VkImageView :count attachmentcount))
+                            (loop for i from 0 below attachmentcount
+			          for attachment in new-value
+				  do (mcffi:memcpy (cffi:mem-aptr pattachments 'VkImageView i) attachment (cffi:foreign-type-size 'VkImageView)))))))  
+  ...)
+```
+
+See how I set the value of `attachmentcount` in `:create` and `:set`. Finally the struct is ready to use.
