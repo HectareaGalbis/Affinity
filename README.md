@@ -20,6 +20,7 @@ Sometimes wrapping a library is difficult and the way how things must be done is
 Each of these macros writes documentation if you enable it. Finally, this library exports some C functions to manage data allocated by C. For more information, see:
 
 * [Reference API](https://github.com/Hectarea1996/more-cffi/blob/main/API.md)
+* [A brief guide](https://github.com/Hectarea1996/more-cffi/blob/main/Guide.md)
 
 
 
