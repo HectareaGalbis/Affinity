@@ -9,8 +9,9 @@ Sometimes wrapping a library is difficult and the way how things must be done is
 
 * `defcfun`: A mix of `cffi:defcfun` and `cffi:foreign-funcall-pointer`.
 * `defwith`: Define `with-` macros.
+* `def-lisp-function`: Define a lisp function.
+* `def-lisp-macro`: Define a lisp macro.
 * `def-foreign-constant`: Define constants.
-* `def-foreign-constant-function`: Define functions from C function macros.
 * `def-foreign-enum`: Define enums.
 * `def-foreign-callback-definer`: Define callback definers.
 * `def-foreign-function`: Define a function wrapper.
