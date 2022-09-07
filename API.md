@@ -220,10 +220,10 @@ Puts the `body` expressions into an implicit progn where a parameter named `file
 
 ## Control variables
 
-### *doc-generation*
+### \*doc-generation\*
 
 It controls the documentation generation. When it is equal to `nil`, all the documentation related functions are disabled and the macros listed above will only generate the necessary code. For example, `with-doc-file` will neither open any file nor define a new parameter. The default value is `nil`.
 
-### *export-symbols*
+### \*export-symbols\*
 
 It controls if the symbols defined by the above macros are exported. The default value is `t`.
