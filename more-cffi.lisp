@@ -225,7 +225,7 @@
     (when result-decls
       (format file " => ")
       (if (> (length result-decls) 1)
-	  (progn
+          (progn
 	    (format file "(values")
 	    (iter (for type-decl in result-decls)
 	      (format file " ~a" (name-des-string (car type-decl))))
