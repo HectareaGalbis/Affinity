@@ -3,6 +3,18 @@
 
 ## Main functionality
 
+### def-lisp-constant
+
+```Lisp
+(def-lisp-constant file name value)
+
+file ::= A stream.
+name ::= A name designator.
+value ::= A lisp value.
+```
+
+Define a constant named `name` with value `value`. It expands to a `defparameter` expression.
+
 ### def-lisp-function
 
 ```Lisp

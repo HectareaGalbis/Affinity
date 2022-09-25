@@ -111,6 +111,11 @@
 (defun doc-note-default (note file)
   (format file "* **Note**: ~a~%~%" note))
 
+(defun doc-lisp-constant-default (name value file)
+  (doc-subheader-default (name-des-string name) file)
+  (format file "```lisp~%(defconstant ~a ~a)~%```~%~%"
+	  (name-des-string name) value))
+
 (defun doc-lisp-function-default (name args docstring arg-declarations return-declarations file)
   (doc-subheader-default (name-des-string name) file)
   (let* ((name-str (name-des-string name))
@@ -173,7 +178,7 @@
     (format file "~%~%")))
 
 (defun doc-foreign-constant-default (foreign-name name value file)
-  (doc-subheader-default foreign-name file)
+  (doc-subheader-default (name-des-string foreign-name) file)
   (format file "```lisp~%(defconstant ~a ~a)~%```~%~%"
 	  (name-des-string name) value))
 
@@ -328,6 +333,7 @@
 (defparameter *doc-subheader-proc* #'doc-subheader-default)
 (defparameter *doc-subsubheader-proc* #'doc-subsubheader-default)
 (defparameter *doc-note-proc* #'doc-note-default)
+(defparameter *doc-lisp-constant-proc* #'doc-lisp-constant-default)
 (defparameter *doc-lisp-function-proc* #'doc-lisp-function-default)
 (defparameter *doc-lisp-macro-proc* #'doc-lisp-macro-default)
 (defparameter *doc-defwith-proc* #'doc-defwith-default)
@@ -371,6 +377,9 @@
   (if (and *doc-generation* file)
       `(funcall *doc-note-proc* ,name ,file)))
 
+(defun doc-lisp-constant (name value file)
+  (funcall *doc-lisp-constant-proc* name value file))
+
 (defun doc-lisp-function (name args docstring arg-declarations return-declarations file)
   (funcall *doc-lisp-function-proc* name args docstring arg-declarations return-declarations file))
 
@@ -399,6 +408,24 @@
 			   virtual-slots type infix file)
   (funcall *doc-foreign-struct-proc* struct-or-union doc-create-info doc-destroy-info doc-accessors-info
 	   type-infos virtual-slots type infix file))
+
+
+;; -----------------------------
+;; ----- def-lisp-constant -----
+;; -----------------------------
+
+(defun check-lisp-constant-name (name)
+  (unless (name-desp name)
+    (error "Expected a name designator.~%Found:~%:   ~s" name)))
+
+(defmacro def-lisp-constant (file name value)
+  (check-lisp-constant-name name)
+  `(progn
+     (defparameter ,(name-des-symbol name) ,value)
+     ,@(when *export-symbols*
+	 `((export ',(name-des-symbol name))))
+     ,@(when (and *doc-generation* file)
+	 `((doc-lisp-constant ',name ',value ,file)))))
 
 
 ;; -----------------------------

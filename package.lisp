@@ -9,6 +9,7 @@
 	   #:*doc-subheader-proc*
 	   #:*doc-subsubheader-proc*
 	   #:*doc-note-proc*
+	   #:*doc-lisp-constant-proc*
 	   #:*doc-lisp-function-proc*
 	   #:*doc-lisp-macro-proc*
 	   #:*doc-defwith-proc*
@@ -25,6 +26,7 @@
 	   #:doc-note
 	   #:memset
 	   #:memcpy
+	   #:def-lisp-constant
 	   #:def-lisp-function
 	   #:def-lisp-macro
 	   #:defcfun
