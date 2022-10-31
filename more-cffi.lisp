@@ -2,6 +2,7 @@
 
 (in-package :mcffi)
 
+(write-in-file #P"docs/mcffi-api")
 
 ;; ----------------------------
 ;; ----- Helper functions -----
@@ -53,818 +54,202 @@
     (t l)))
 
 
-;; Name designator predicate
-(defun name-desp (name)
-  (and (not (null name))
-       (or (keywordp name)
-	   (symbolp name)
-	   (stringp name))))
-
-;; Return t if two symbols of two name designators are the same
-;; (defun name= (name1 name2)
-;;   (eq (name-des-symbol name1) (name-des-symbol name2)))
-
-;; Turn a name designator into a keyword
-(defun name-des-keyword (name)
-  (cond
-    ((keywordp name) name)
-    ((symbolp name) (intern (string name) "KEYWORD"))
-    ((stringp name) (intern (string-upcase name) "KEYWORD"))))
-
-;; Turn a name designator into a symbol
-(defun name-des-symbol (name)
-  (cond
-    ((keywordp name) (intern (string name)))
-    ((symbolp name) name)
-    ((stringp name) (intern (string-upcase name)))))
-
-;; Turn a name designator into a string
-(defun name-des-string (name)
-  (let ((*print-case* :downcase))
-    (princ-to-string name)))
-
-
-;; Type designator
-(defun type-desp (type)
-  (or (consp type)
-      (stringp type)
-      (symbolp type)))
-
-;; Turn a type designator into a string
-(defun type-des-string (str)
-  (let ((*print-case* :downcase))
-    (princ-to-string str)))
-
-;; -------------------------------------------
-;; ----- Documentation default functions -----
-;; -------------------------------------------
-
-(defun doc-header-default (name file)
-  (format file "# ~a~%~%" name))
-
-(defun doc-subheader-default (name file)
-  (format file "## ~a~%~%" name))
-
-(defun doc-subsubheader-default (name file)
-  (format file "---~%~%### ~a~%~%" name))
-
-(defun doc-note-default (note file)
-  (format file "* **Note**: ~a~%~%" note))
-
-(defun doc-lisp-constant-default (name value file)
-  (doc-subheader-default (name-des-string name) file)
-  (format file "```lisp~%(defconstant ~a ~a)~%```~%~%"
-	  (name-des-string name) value))
-
-(defun doc-lisp-function-default (name args docstring arg-declarations return-declarations file)
-  (doc-subheader-default (name-des-string name) file)
-  (let* ((name-str (name-des-string name))
-	 (arg-names-sym-str (iter (for arg-decl in arg-declarations)
-				(appending (list (name-des-symbol (car arg-decl))
-						 (name-des-string (car arg-decl))))))
-	 (args-str (rec-substitute arg-names-sym-str args)))
-    (format file "**~a**~%```lisp~%(~a" name-str name-str)
-    (when args
-      (format file "~{ ~a~}" args-str))
-    (format file ")")
-    (when return-declarations
-      (format file " => ")
-      (if (> (length return-declarations) 1)
-	  (progn
-	    (format file "(values")
-	    (iter (for type-decl in return-declarations)
-	      (format file " ~a" (name-des-string (car type-decl))))
-	    (format file ")"))
-	  (format file "~a" (name-des-string (caar return-declarations)))))
-    (format file "~%")
-    (format file "```~%~%")
-    (when docstring
-      (format file "~a~%~%" docstring))
-    (when arg-declarations
-      (format file "* *Parameters*:~%")
-      (iter (for type-decl in arg-declarations)
-	(format file "  * *~a*: `~a`~%"
-		(name-des-string (car type-decl)) (type-des-string (cadr type-decl)))
-	(finally (format file "~%"))))
-    (when return-declarations
-      (format file "* *Return:*~%")
-      (iter (for result-decl in return-declarations)
-	(format file "  * *~a*: `~a`~%"
-		(name-des-string (car result-decl)) (type-des-string (cadr result-decl)))
-	(finally (format file "~%"))))))
-
-(defun doc-lisp-macro-default (name args docstring file)
-  (doc-subheader-default (name-des-string name) file)
-  (let ((name-str (name-des-string name)))
-    (format file "**~a**~%```lisp~%(~a" name-str name-str)
-    (when args
-      (format file "~{ ~a~}" (mapcar #'string args)))
-    (format file ")")
-    (format file "~%")
-    (format file "```~%~%")
-    (when docstring
-      (format file "~a~%~%" docstring))))
-
-(defun doc-defwith-default (name create destroy file)
-  (let ((name-str (name-des-string name))
-	(create-str (name-des-string create))
-	(destroy-str (name-des-string destroy)))
-    (format file "**~a**~%```lisp~%(~a var (&rest args)~%  &body body)~%```~%"
-	    name-str name-str)
-    (format file "Wrap the body expressions with `~a` and `~a`."
-	    create-str destroy-str)
-    (format file " The new object(s) is(are) bound to `var`.")
-    (format file " The arguments `args` are passed to the constructor.")
-    (format file "~%~%")))
-
-(defun doc-foreign-constant-default (foreign-name name value file)
-  (doc-subheader-default (name-des-string foreign-name) file)
-  (format file "```lisp~%(defconstant ~a ~a)~%```~%~%"
-	  (name-des-string name) value))
-
-(defun doc-foreign-enum-default (name descriptors file)
-  (doc-subheader-default (name-des-string name) file)
-  (format file "```lisp~%~{~a~%~}```~%~%"
-	  (mapcar (lambda (x) (list 'defconstant (name-des-string (car x)) (cadr x))) descriptors)))
-
-(defun doc-foreign-callback-definer-default (foreign-type name create-info return-info file)
-  (let ((foreign-type-str (name-des-string foreign-type))
-	(name-str (name-des-string name))
-	(args-str (mapcar (lambda (x) (name-des-string (car x))) create-info))
-	(arg-types-str (mapcar (lambda (x) (name-des-string (cadr x))) create-info))
-	(arg-typesp (mapcar #'caddr create-info))
-	(ret-arg-str (name-des-string (car return-info)))
-	(ret-type-str (name-des-string (cadr return-info)))
-	(ret-typep (caddr return-info)))
-    (format file "**~a**~%```lisp~%(~a (~{~a~^ ~})~% &body body) => ~a~%```~%"
-	    foreign-type-str name-str args-str ret-arg-str)
-    (format file "Define a callback function.~%~%")
-    (when create-info
-      (format file "* *Parameters:*~%")
-      (iter (for arg-str in args-str)
-	(for arg-type-str in arg-types-str)
-	(for arg-typep in arg-typesp)
-	(format file "  * *~a*" arg-str)
-	(when arg-typep
-	  (format file ": `~a`" arg-type-str))
-	(format file "~%"))
-      (format file "~%"))
-    (when return-info
-      (format file "* *Return:*~%")
-      (format file "  * *~a*" ret-arg-str)
-      (when ret-typep
-	(format file ": `~a`" ret-type-str))
-      (format file "~%~%"))))
-
-(defun doc-foreign-function-default (foreign-name name docstring args type-decls result-decls file)
-  (when foreign-name (doc-subheader-default (name-des-string foreign-name) file))
-  (let* ((name-str (name-des-string name))
-	 (typed-names-sym-str (iter (for type-decl in type-decls)
-				(appending (list (name-des-symbol (car type-decl))
-						 (name-des-string (car type-decl))))))
-	 (args-str (rec-substitute typed-names-sym-str args)))
-    (format file "**~a**~%```lisp~%(~a" name-str name-str)
-    (when args
-      (format file "~{ ~a~}" args-str))
-    (format file ")")
-    (when result-decls
-      (format file " => ")
-      (if (> (length result-decls) 1)
-          (progn
-	    (format file "(values")
-	    (iter (for type-decl in result-decls)
-	      (format file " ~a" (name-des-string (car type-decl))))
-	    (format file ")"))
-	  (format file "~a" (name-des-string (caar result-decls)))))
-    (format file "~%")
-    (format file "```~%~%")
-    (when docstring
-      (format file "~a~%~%" docstring))
-    (when type-decls
-      (format file "* *Parameters*:~%")
-      (iter (for type-decl in type-decls)
-	(format file "  * *~a*: `~a`~%"
-		(name-des-string (car type-decl)) (type-des-string (cadr type-decl)))
-	(finally (format file "~%"))))
-    (when result-decls
-      (format file "* *Return:*~%")
-      (iter (for result-decl in result-decls)
-	(format file "  * *~a*: `~a`~%"
-		(name-des-string (car result-decl)) (type-des-string (cadr result-decl)))
-	(finally (format file "~%"))))))
-
-(defun doc-foreign-macro-default (foreign-name name args docstring file)
-  (doc-subheader-default (name-des-string foreign-name) file)
-  (let ((name-str (name-des-string name)))
-    (format file "**~a**~%```lisp~%(~a" name-str name-str)
-    (when args
-      (format file "~{ ~a~}" (mapcar #'string args)))
-    (format file ")")
-    (format file "~%")
-    (format file "```~%~%")
-    (when docstring
-      (format file "~a~%~%" docstring))))
-
-(defun doc-foreign-struct-default (struct-or-union doc-create-info doc-destroy-info doc-accessors-info type-infos virtual-slots
-				   type infix file)
-  (destructuring-bind (no-constructor-p constructor-parameters) doc-create-info
-    (let* ((type-str (name-des-string type))
-	   (infix-str (name-des-string infix))
-	   (constructor-str (concatenate 'string "create-" infix-str))
-	   (destructor-str (concatenate 'string "destroy-" infix-str))
-	   (no-destructor-p doc-destroy-info))
-      (doc-subsubheader-default type-str file)
-      (let* ((struct-members (iter (for member-type in (append (cffi:foreign-slot-names (list struct-or-union (name-des-symbol type))) virtual-slots))
-			       (let ((constructor-memberp (member member-type constructor-parameters
-								  :key #'car :test #'string-equal))
-				     (accessor-memberp (member member-type doc-accessors-info
-							       :key #'car :test #'string-equal)))
-				 (when (or constructor-memberp accessor-memberp)
-				   (collect (or (caar constructor-memberp) (caar accessor-memberp))))))))
-	(when struct-members
-	  (format file "**Members**~%")
-	  (iter (for struct-member in struct-members)
-	    (format file "* *~a*" (name-des-string struct-member))
-	    (let ((type-infop (member struct-member type-infos :key #'car :test #'string-equal)))
-	      (when type-infop
-		(format file ": `~a`" (type-des-string (cadar type-infop)))))
-	    (format file "~%"))
-	  (format file "~%")))
-      (when (not no-constructor-p)
-	(format file "**~a**~%```lisp~%(~a"
-		constructor-str constructor-str)
-	(when constructor-parameters
-	  (format file " &key~%")
-	  (iter (for param in constructor-parameters)
-	    (destructuring-bind (keyword init-form) param
-	      (let ((keyword-str (name-des-string keyword))
-		    (num-spaces (+ (length constructor-str) 4)))
-		(when (not (first-iteration-p))
-		  (format file "~%"))
-		(format file (concatenate 'string "~" (write-to-string num-spaces) "T(~a ~a)")
-			keyword-str init-form))))
-	  (format file ")~%```~%~%")))
-      (when (not no-destructor-p)
-	(format file "**~a**~%```lisp~%(~a obj)~%```~%~%"
-		destructor-str destructor-str))
-      (when (and (not no-constructor-p) (not no-constructor-p))
-	(doc-defwith (concatenate 'string "with-" infix-str) constructor-str destructor-str file))
-      (when doc-accessors-info
-	(format file "**Accessors**~%```lisp~%")
-	(iter (for doc-accessor-info in doc-accessors-info)
-	  (destructuring-bind (slot-name rest-parameters setf-ablep) doc-accessor-info
-	    (let ((get-name (concatenate 'string infix-str "-" (name-des-string slot-name)))
-		  (*print-case* :downcase))
-	      (format file "(~a obj~{ ~a~})" get-name rest-parameters)
-	      (if setf-ablep
-		  (format file " ; setf-able"))
-	      (format file "~%"))))
-	(format file "```~%~%")))))
-
-
-;; --------------------------
-;; ----- Global options -----
-;; --------------------------
-
-;; Documentation generation
-(defparameter *doc-generation* nil)
-
-(defparameter *doc-header-proc* #'doc-header-default)
-(defparameter *doc-subheader-proc* #'doc-subheader-default)
-(defparameter *doc-subsubheader-proc* #'doc-subsubheader-default)
-(defparameter *doc-note-proc* #'doc-note-default)
-(defparameter *doc-lisp-constant-proc* #'doc-lisp-constant-default)
-(defparameter *doc-lisp-function-proc* #'doc-lisp-function-default)
-(defparameter *doc-lisp-macro-proc* #'doc-lisp-macro-default)
-(defparameter *doc-defwith-proc* #'doc-defwith-default)
-(defparameter *doc-foreign-constant-proc* #'doc-foreign-constant-default)
-(defparameter *doc-foreign-enum-proc* #'doc-foreign-enum-default)
-(defparameter *doc-foreign-callback-definer-proc* #'doc-foreign-callback-definer-default)
-(defparameter *doc-foreign-function-proc* #'doc-foreign-function-default)
-(defparameter *doc-foreign-macro-proc* #'doc-foreign-macro-default)
-(defparameter *doc-foreign-struct-proc* #'doc-foreign-struct-default)
-
-
-;; Export symbols
-(defparameter *export-symbols* t)
-
-
-;; -----------------------------------
-;; ----- Documentation functions -----
-;; -----------------------------------
-
-(defmacro with-doc-file ((file path) &body body)
-  (if *doc-generation*
-      `(progn
-	 (defparameter ,file (open ,path :direction :output :if-exists :supersede :if-does-not-exist :create))
-	 ,(cons 'progn body)
-	 (close ,file))
-      (cons 'progn body)))
-
-(defmacro doc-header (file name)
-  (if (and *doc-generation* file)
-      `(funcall *doc-header-proc* ,name ,file)))
-
-(defmacro doc-subheader (file name)
-  (if (and *doc-generation* file)
-      `(funcall *doc-subheader-proc* ,name ,file)))
-
-(defmacro doc-subsubheader (file name)
-  (if (and *doc-generation* file)
-      `(funcall *doc-subsubheader-proc* ,name ,file)))
-
-(defmacro doc-note (file name)
-  (if (and *doc-generation* file)
-      `(funcall *doc-note-proc* ,name ,file)))
-
-(defun doc-lisp-constant (name value file)
-  (funcall *doc-lisp-constant-proc* name value file))
-
-(defun doc-lisp-function (name args docstring arg-declarations return-declarations file)
-  (funcall *doc-lisp-function-proc* name args docstring arg-declarations return-declarations file))
-
-(defun doc-lisp-macro (name args docstring file)
-  (funcall *doc-lisp-macro-proc* name args docstring file))
-
-(defun doc-defwith (name create destroy file)
-  (funcall *doc-defwith-proc* name create destroy file))
-
-(defun doc-foreign-constant (foreign-name name value file)
-  (funcall *doc-foreign-constant-proc* foreign-name name value file))
-
-(defun doc-foreign-enum (name descriptors file)
-  (funcall *doc-foreign-enum-proc* name descriptors file))
-
-(defun doc-foreign-callback-definer (foreign-type name create-info return-info file)
-  (funcall *doc-foreign-callback-definer-proc* foreign-type name create-info return-info file))
-
-(defun doc-foreign-function (foreign-name name docstring args type-decls result-decls file)
-  (funcall *doc-foreign-function-proc* foreign-name name docstring args type-decls result-decls file))
-
-(defun doc-foreign-macro (foreign-name name args docstring file)
-  (funcall *doc-foreign-macro-proc* foreign-name name args docstring file))
-
-(defun doc-foreign-struct (struct-or-union doc-create-info doc-destroy-info doc-accessors-info type-infos
-			   virtual-slots type infix file)
-  (funcall *doc-foreign-struct-proc* struct-or-union doc-create-info doc-destroy-info doc-accessors-info
-	   type-infos virtual-slots type infix file))
-
-
-;; -----------------------------
-;; ----- def-lisp-constant -----
-;; -----------------------------
-
-(defun check-lisp-constant-name (name)
-  (unless (name-desp name)
-    (error "Expected a name designator.~%Found:~%:   ~s" name)))
-
-(defmacro def-lisp-constant (file name value)
-  (check-lisp-constant-name name)
-  `(progn
-     (defparameter ,(name-des-symbol name) ,value)
-     ,@(when *export-symbols*
-	 `((export ',(name-des-symbol name))))
-     ,@(when (and *doc-generation* file)
-	 `((doc-lisp-constant ',name ',value ,file)))))
-
-
-;; -----------------------------
-;; ----- def-lisp-function -----
-;; -----------------------------
-
-(defun check-lisp-function-name (name)
-  (unless (name-desp name)
-    (error "Expected a name designator.~%Found:~%   ~S" name)))
-
-(defun check-lisp-function-type-declarations (decl name args)
-  (unless decl
-    (error "Expected a DECLARE-TYPES form in the body."))
-  (unless (>= (length decl) 2)
-    (error "Expected more elements in type declaration."))
-  (iter (for rest-decl on (cdr decl))
-    (let ((type-decl (car rest-decl)))
-      (unless (or (symbolp type-decl) (listp type-decl))
-	(error "Expected :return or a list in ~a.~%Found:~%   ~a" name type-decl))
-      (when (symbolp type-decl)
-	(unless (eq type-decl :return)
-	  (error "The only available keyword is :return.~%Found: ~a" type-decl))
-	(unless (not (null (cdr rest-decl)))
-	  (error "Expected a list after :return in ~a" name))
-	(counting type-decl into return-found))
-      (when (listp type-decl)
-	(unless (>= (length type-decl) 2)
-	  (error "The lists must have two or more elements.~%Found in ~a:~%   ~S" name type-decl))
-	(unless (type-desp (car type-decl))
-	  (error "Expected a type designator at the start of a type declaration in ~a.~%Found:~%   ~a"
-		 name type-decl))
-	(iter (for sym in (cdr type-decl))
-	  (unless (name-desp sym)
-	    (error "Expected a name designator in ~a type declaration.~%Found:~%   ~a" name type-decl))
-	  (when (= return-found 0)
-	    (let ((sym-sym (name-des-symbol sym)))
-	      (unless (exists-rec (list sym-sym) args)
-		(error "There is no symbol ~a in arguments from ~a." sym-sym name)))))))))
-
-(defun extract-lisp-function-type-declarations (body)
-  (iter (for type-decl in body)
-    (when (and (listp type-decl) (string= (car type-decl) "DECLARE-TYPES"))
-      (return type-decl))))
-
-(defun remove-lisp-function-type-declarations (body)
-  (remove "DECLARE-TYPES" body :test #'string= :key (lambda (decl)
-						      (when (listp decl)
-							(car decl)))))
-
-(defun extract-lisp-function-docstring (body)
-  (if (stringp (car body))
-      (car body)
-      nil))
-
-(defun extract-lisp-function-arg-declarations (decl)
-  (iter outer (for type-decl in (cdr decl))
-    (until (eq type-decl :return))
-    (iter (for var in (cdr type-decl))
-      (in outer (collect (list var (car type-decl)))))))
-
-(defun extract-lisp-function-return-declarations (decl)
-  (let ((type-decls (cdr (member :return decl))))
-    (iter outer (for type-decl in type-decls)
-      (iter (for var in (cdr type-decl))
-	(in outer (collect (list var (car type-decl))))))))
-
-(defmacro def-lisp-function (doc-file name args &body body)
-  (check-lisp-function-name name)
-  (let ((decl (extract-lisp-function-type-declarations body)))
-    (check-lisp-function-type-declarations decl name args)
-    (let ((arg-declarations (extract-lisp-function-arg-declarations decl))
-	  (return-declarations (extract-lisp-function-return-declarations decl))
-	  (docstring (extract-lisp-function-docstring body))
-	  (final-body (if decl
-			  (remove-lisp-function-type-declarations body)
-			  body)))
-      `(progn
-	 (defun ,(name-des-symbol name) ,args
-	   ,@final-body)
-	 ,@(when *export-symbols*
-	     `((export ',(name-des-symbol name))))
-	 ,@(when (and *doc-generation* doc-file)
-	     `((doc-lisp-function ',name ',args ',docstring ',arg-declarations ',return-declarations ,doc-file)))))))
-
-
-;; --------------------------
-;; ----- def-lisp-macro -----
-;; --------------------------
-
-(defun check-lisp-macro-name (name)
-  (unless (name-desp name)
-    (error "Expected a name designator.~%Found~%:   ~s" name)))
-
-(defun check-lisp-macro-args (args)
-  (unless (and (listp args)
-	       (iter (for arg in args)
-		 (always (symbolp arg))))
-    (error "Expected a list of symbols.~%Found:~%   ~s" args)))
-
-(defun extract-lisp-macro-docstring (body)
-  (if (stringp (car body))
-      (car body)
-      nil))
-
-(defmacro def-lisp-macro (file name args &body body)
-  (check-lisp-macro-name name)
-  (check-lisp-macro-args args)
-  (let ((docstring (extract-lisp-macro-docstring body)))
-    `(progn
-       (defmacro ,(name-des-symbol name) ,args
-	 ,@body)
-       ,@(when *export-symbols*
-	   `((export ',(name-des-symbol name))))
-       ,@(when (and *doc-generation* file)
-	   `((doc-lisp-macro ',name ',args ',docstring ,file))))))
-
-
-;; -------------------
-;; ----- defcfun -----
-;; -------------------
-
-(defun check-defcfun-foreign-name (foreign-name)
-  (unless (stringp foreign-name)
-    (error "Expected a string. Found: ~s" foreign-name)))
-
-(defun check-defcfun-name (name)
-  (unless (symbolp name)
-    (error "Expected a symbol. Found: ~s" name)))
-
-(defun check-defcfun-funcall-name (funcall-name)
-  (unless (or (null funcall-name) (symbolp funcall-name))
-    (error "Expected nil or symbol. Found: ~s" funcall-name)))
-
-(defun check-defcfun-arguments (arguments)
-  (iter (for argument in arguments)
-    (unless (and (listp argument)
-		 (equal (length argument) 2)
-		 (symbolp (car argument)))
-      (error "Expected a list with a symbol and a foreign type. Found: ~s" argument))))
-
-(defmacro defcfun ((foreign-name name &optional (funcall-name nil)) return-type &body arguments)
-  (let ((name-args (mapcar #'car arguments))
-	(ordered-args (apply #'append (mapcar (lambda (arg) (list (cadr arg) (car arg))) arguments)))
-	(func-ptr (gensym)))
-    (unless (or name funcall-name)
-      (warn "MORE-CFFI:defcfun : name and funcall-name arguments are both nil"))
-    `(progn
-       ,@(when name
-	   `((defun ,name ,name-args
-	       (cffi:foreign-funcall ,foreign-name ,@ordered-args ,return-type))))
-       ,@(when funcall-name
-	   `((defun ,funcall-name ,(cons func-ptr name-args)
-	       (cffi:foreign-funcall-pointer ,func-ptr () ,@ordered-args ,return-type)))))))
-
 
 ;; -------------------
 ;; ----- defwith -----  
 ;; -------------------
 
-(defun check-defwith-name (name)
-  (unless (name-desp name)
-    (error "Expected a name designator.~%Found:~%   ~S" name)))
+(adp:defmacro defwith (name create destroy &key (destructor-arity 1) destructor-arguments)
+  "Define a macro named NAME. This new macro has the following syntax:
 
-(defun check-create (name)
-  (unless (name-desp name)
-    (error "Expected a name designator.~%Found:~%   ~S" name)))
+  (NAME var-or-vars (&rest args) &body body)
 
-(defun check-destroy (name)
-  (unless (name-desp name)
-    (error "Expected a name designator.~%Found:~%   ~S" name)))
-
-(defun check-destructor-arity (arity)
-  (unless (and (integerp arity)
-	       (>= arity 1))
-    (error "Expected a positive integer after :destructor-arity.~%Found:~%   ~S" arity)))
-
-(defun check-destructor-arguments (arg-positions)
-  (unless (and (listp arg-positions)
-	       (iter (for n in arg-positions)
-		 (always (and (integerp n)
-			      (>= n 0)))))
-    (error "Expected a list of non-negative integers.~%Found:~%   ~S" arg-positions)))
-
-;; Defines a with macro named name, using a constructor and a destructor
-;; The constructor can receive zero or more arguments and can return one or more values
-;; The destructor must receive 'destructor-arity' arguments or the arguments described by 'destructor-arguments'
-;; The resulting macro binds some vars to the results from the constructor. These vars can be fewer than the returned values
-(defmacro defwith (file name create destroy &key (destructor-arity 1 destructor-arityp) (destructor-arguments nil destructor-argumentsp))
-  (check-defwith-name name)
-  (check-create create)
-  (check-destroy destroy)
+When using this new macro CREATE is called with ARGS and the results are stored in VAR-OR-VARS. If VAR-OR-VARS
+is a symbol, the rest of returned values are ignored. Afterwards, the BODY forms are evaluated. Finally, 
+DESTROY is called. The arguments used by DESTROY depends on DESTRCUTOR-ARITY and DESTRUCTOR-ARGUMENTS. If
+DESTRUCTOR-ARGUMENTS is specified, it must be a list of non-negative integers denoting the arguments returned
+by CREATE to be used by DESTROY in the order they appear. For example, using the list (3 0 2) indicates that
+DESTROY will receive the fourth, first and third values returned by CREATE and in that order. If this parameter
+is not used but DESTRUCTOR-ARITY is, then it must be a non-negative integer indicating the number of arguments
+to be used by DESTROY. For example, if 2 is specified as the DESTRUCTOR-ARITY, then
+DESTROY will receive the first 2 values returned by CREATE."
+  (check-type name symbol)
+  (check-type create symbol)
+  (check-type destroy symbol)
   (when destructor-arityp
-    (check-destructor-arity destructor-arity))
+    (check-type destructor-arityp unsigned-byte "a non-negative integer"))
   (when destructor-argumentsp
-    (check-destructor-arguments destructor-arguments))
-  (with-gensyms ((var "var") (var-list "var-list") (args "args") (ret-list "ret-list") (body "body"))
-    (let ((name-sym (name-des-symbol name)))
-      `(progn
-	 (defmacro ,name-sym (,var ,args &body ,body)
-	   (with-gensyms ((,ret-list "ret-list"))
-             (let ((,var-list (if (listp ,var)
-				  ,var
-				  (list ,var))))
-               `(let ((,,ret-list (multiple-value-list (,',(name-des-symbol create) ,@,args))))
-		  (unwind-protect
-                       (multiple-value-bind ,,var-list (values-list ,,ret-list)
-			 ,@,body)
-                    (apply #',',(name-des-symbol destroy) ,,(if destructor-arguments
-								``(loop for index in ',',destructor-arguments
-									collect (nth index ,,ret-list))
-								``(subseq ,,ret-list 0 ,',destructor-arity))))))))
-	 ,@(when *export-symbols*
-	     `((export ',name-sym)))
-	 ,@(when (and *doc-generation* file)
-	     `((doc-defwith ',name ',create ',destroy ,file)))))))
-
-
-;; --------------------------------
-;; ----- def-foreign-constant -----
-;; --------------------------------
-
-(defun check-constant-foreign-name (foreign-name)
-  (unless (name-desp foreign-name)
-    (error "Expected a name designator.~%Found~%:   ~s" foreign-name)))
-
-(defun check-constant-name (name)
-  (unless (name-desp name)
-    (error "Expected a name designator.~%Found:~%:   ~s" name)))
-
-(defmacro def-foreign-constant (file foreign-name name value)
-  (check-constant-foreign-name foreign-name)
-  (check-constant-name name)
-  `(progn
-     (defparameter ,(name-des-symbol name) ,value)
-     ,@(when *export-symbols*
-	 `((export ',(name-des-symbol name))))
-     ,@(when (and *doc-generation* file)
-	 `((doc-foreign-constant ',foreign-name ',name ',value ,file)))))
-
-
-;; ----------------------------
-;; ----- def-foreign-enum -----
-;; ----------------------------
-
-(defun check-enum-name (name)
-  (unless (name-desp name) 
-    (error "Expected a name designator.~%Found:~%   ~s" name)))
-
-(defun check-enum-descriptor (descriptor)
-  (unless (and (listp descriptor)
-	       (= (length descriptor) 2))
-    (error "Expected a list of two elements.~%Found:~%   ~s" descriptor))
-  (unless (name-desp (car descriptor))
-    (error "Expected a name designator.~%Found:~%   ~s" (car descriptor))))
-
-(defun check-enum-descriptors (descriptors)
-  (iter (for descriptor in descriptors)
-    (check-enum-descriptor descriptor)))
-
-(defmacro def-foreign-enum (file name &rest descriptors)
-  (check-enum-name name)
-  (check-enum-descriptors descriptors)
-  `(progn
-     (cffi:defctype ,(name-des-symbol name) :int)
-     ,@(mapcar (lambda (x) (list 'defparameter (name-des-symbol (car x)) (cadr x))) descriptors)
-     ,@(when *export-symbols*
-	 (mapcar (lambda (x) `(export ',(name-des-symbol (car x)))) descriptors))
-     ,@(when (and *doc-generation* file)
-	 `((doc-foreign-enum ',name ',descriptors ,file)))))
+    (check-type destructor-argumentsp list)
+    (loop for dest-arg in destructor-arguments
+	  do (check-type dest-arg unsigned-byte "a non-negative integer")))
+  (with-gensyms (var args body ret-list-sym var-list)
+    `(adp:defmacro ,name (,var ,args &body ,body)
+       (with-gensyms ((,ret-list-sym "ret-list"))
+         (let ((,var-list (if (listp ,var)
+			      ,var
+			      (list ,var))))
+           `(let ((,,ret-list-sym (multiple-value-list (,',create ,@,args))))
+	      (unwind-protect
+                   (destructuring-bind ,,var-list ,,ret-list-sym
+		     ,@,body)
+                (apply #',',destroy ,,(if destructor-arguments
+					  ``(loop for index in ',',destructor-arguments
+						  collect (nth index ,,ret-list-sym))
+					  ``(subseq ,,ret-list-sym 0 ,',destructor-arity))))))))))
 
 
 ;; ----------------------------------------
 ;; ----- def-foreign-callback-definer -----
 ;; ----------------------------------------
 
-(defun check-definer-foreign-type (foreign-type)
-  (unless (name-desp foreign-type)
-    (error "Expected a name designator.~%Found:~%   ~S" foreign-type)))
-
-(defun check-definer-name (name)
-  (unless (name-desp name)
-    (error "Expected a name designator.~%Found:~%   ~S" name)))
-
-(defun check-arg-slot (arg)
-  (unless (name-desp arg)
-    (error "Expected a name designator at the start of descriptor.~%Found:~%   ~S" arg)))
-
-(defun check-arg-type (type arg-slot)
-  (unless (type-desp type)
-    (error "Expected a type designator after :type in ~a descriptor.~%Found:~%   ~S" (name-des-string arg-slot) type)))
-
-(defun check-arg-foreign-type (ftype arg-slot)
-  (unless (or (symbolp ftype)
-	      (and (listp ftype)
-		   (or (eq (car ftype) :struct)
-		       (eq (car ftype) :union))))
-    (error "Expected a cffi type after :foreign-type in ~a descriptor.~%Found:~%   ~s" arg-slot ftype)))
-
-(defun check-arg-create (arg-create virtualp arg-slot)
-  (unless (or (not virtualp) (not (null arg-create)))
-    (error "Virtual slots must have a non-nil create expression. Found in ~a argument." (name-des-string arg-slot)))
-  (unless (or (null arg-create) virtualp (exists-rec (list (name-des-symbol arg-slot)) arg-create))
-    (error "Create expression must use the ~a argument." (name-des-string arg-create))))
-
-(defun check-arg-return (arg-return arg-slot)
-  (unless (exists-rec (list (name-des-symbol arg-slot)) arg-return)
-    (error "Return expression must use the ~a argument." (name-des-string arg-return))))
-
 (defun check-arg-descriptor (arg-descriptor)
-  (unless (and (listp arg-descriptor)
+  (assert (and (listp arg-descriptor)
 	       (not (null arg-descriptor)))
-    (error "Expected a non-null list.~%Found:~%   ~S" arg-descriptor))
-  (check-arg-slot (car arg-descriptor))
-  (let ((createp (member :create arg-descriptor))
+	  () "Expected a non-null list.~%Found:~%   ~S" arg-descriptor)
+  (check-type (car arg-descriptor) symbol)
+  (let ((slot-name (car arg-descriptor))
+	(createp (member :create arg-descriptor))
 	(returnp (member :return arg-descriptor))
-	(arg-ftypep (member :foreign-type arg-descriptor))
+	(typep (member :type arg-descriptor))
 	(virtualp (cadr (member :virtual arg-descriptor))))
-    (when (and virtualp returnp)
-      (error "If :virtual is used, :return is forbidden. Found them in ~a descriptor"
-	     (car arg-descriptor)))
-    (when (and virtualp arg-ftypep)
-      (error "If :virtual is used, :foreign-type is forbidden. Found them in ~a descriptor."
-	     (car arg-descriptor)))
-    (when (and createp returnp)
-      (error "Just one of :create or :return can appear in an argument descriptor.~%Found in ~a descriptor:~%   ~S~%   ~S"
-	     (name-des-string (car arg-descriptor)) (subseq createp 0 2) (subseq returnp 0 2)))
-    (unless arg-ftypep
-      (error "Expected :foreign-type and a cffi type in ~a descriptor." (car arg-descriptor)))
-    (iter (for rest-descriptor on (cdr arg-descriptor) by #'cddr)
-      (unless (member (car rest-descriptor) '(:foreign-type :type :virtual :create :return))
-	(error "Expected :foreign-type, :type, :create or :return in ~a descriptor.~%Found:~%   ~S"
-	       (name-des-string (car arg-descriptor)) (car rest-descriptor)))
-      (cond
-	((eq (car rest-descriptor) :type)
-	 (check-arg-type (cadr rest-descriptor) (car arg-descriptor)))
-	((eq (car rest-descriptor) :foreign-type)
-	 (check-arg-foreign-type (cadr rest-descriptor) (car arg-descriptor)))
-	((eq (car rest-descriptor) :create)
-	 (check-arg-create (cadr rest-descriptor) virtualp (car arg-descriptor)))
-	((eq (car rest-descriptor) :return)
-	 (check-arg-return (cadr rest-descriptor) (car arg-descriptor)))))))
+    (assert (not (and virtualp returnp)) () "If :virtual is used, :return is forbidden. Found them in ~s descriptor"
+	    slot-name)
+    (assert (not (and createp returnp)) () "Just one of :create or :return can appear in an argument descriptor.~%Found in ~s descriptor:~%   ~S~%   ~S"
+	    slot-name (subseq createp 0 2) (subseq returnp 0 2))
+    (assert typep () "Expected :type and a cffi type in ~s descriptor." slot-name)
+    (loop for rest-descriptor on (cdr arg-descriptor) by #'cddr
+	  for option-type = (car rest-descriptor)
+	  for option-value = (cadr rest-descriptor)
+	  do (assert (member option-type '(:type :virtual :create :return)) ()
+		     "Expected :type, :create or :return in ~s descriptor.~%Found:~%   ~S"
+		     slot-name option-type)
+	     (case option-type
+	       (:type
+		(assert (or (symbolp option-value)
+			    (and (listp option-value)
+				 (or (eq (car option-value) :struct)
+				     (eq (car option-value) :union))))
+			() "Expected a cffi type after :type in ~s descriptor.~%Found:~%   ~s" slot-name option-value))
+	       (:create
+		(assert (or (not virtualp) (not (null option-value))) ()
+			"Virtual slots must have a non-nil create expression. Found in ~a argument." slot-name)
+		(assert (or (null option-value) virtualp (exists-rec (list slot-name) option-value))
+			"Create expression must use the ~s argument." slot-name))
+	       (:return
+		 (assert (exists-rec (list slot-name) option-value)
+		   (error "Return expression must use the ~s argument." option-value)))))))
 
 (defun check-arg-descriptors (arg-descriptors)
-  (iter (for arg-descriptor in arg-descriptors)
-    (check-arg-descriptor arg-descriptor)
-    (let ((arg-returnp (member :return arg-descriptor)))
-      (when arg-returnp
-	(collect arg-returnp into return-args)))
-    (finally (let ((num-return-args (length return-args)))
-	       (unless (<= num-return-args 1)
-		 (error "Expected zero or one return argument. There are ~a:~%   (~{~S~^ ~})"
-			num-return-args return-args))))))
+  (loop for arg-descriptor in arg-descriptors
+	do (check-arg-descriptor arg-descriptor)
+	count (member :return arg-descriptor) into return-descriptors
+	finally (assert (<= return-descriptors 1) ()
+			"Expected zero or one return argument. Found ~a" return-descriptors)))
 
-;; Return a list of lists with 5 elements
-;; 1. The arg name
-;; 2. The create expression
-;; 3. The arg foreign type
-;; 4. Whether is a foreign argument.
-;; 5. Whether is a lisp argument.
 (defun extract-create-arguments (arg-descriptors)
-  (iter (for arg-descriptor in arg-descriptors)
-    (let ((createp (member :create arg-descriptor))
-	  (returnp (member :return arg-descriptor))
-	  (virtualp (member :virtual arg-descriptor)))
-      (when (or createp (not returnp))
-	(collect (list (car arg-descriptor)
-		       (if createp (cadr createp) (name-des-symbol (car arg-descriptor)))
-		       (cadr (member :foreign-type arg-descriptor))
-		       (not virtualp)
-		       (or virtualp (not createp) (cadr createp))))))))
+  "Return a list of lists with 5 elements: The slot name, the create expression, the type,
+whether is a foreign argument and whether is a lisp argument."
+  (loop for arg-descriptor in arg-descriptors
+	for slot-name = (car arg-descriptor)
+	fot type = (cadr (member :type arg-descriptor))
+	for createp = (member :create arg-descriptor)
+	for returnp = (member :return arg-descriptor)
+	for virtualp = (member :virtual arg-descriptor)
+	when (or createp (not returnp))
+	  collect (list slot-name
+			(if createp (cadr createp) slot-name)
+			type
+			(not virtualp)
+			(or virtualp (not createp) (cadr createp)))))
 
-;; Return a list with two elements.
-;; 1. The return arg name
-;; 2. The return expression
-;; 3. The return foreign type
 (defun extract-return-argument (arg-descriptors)
-  (iter (for arg-descriptor in arg-descriptors)
-    (let ((returnp (member :return arg-descriptor)))
-      (when returnp
-	(return (list (car arg-descriptor) (cadr returnp) (cadr (member :foreign-type arg-descriptor))))))))
+  "Return a list with three elements: The slot name, the return expression and the type."
+  (loop for arg-descriptor in arg-descriptors
+	for slot-name = (car arg-descriptor)
+	for returnp = (member :return arg-descriptor)
+	for type = (cadr (member :type arg-descriptor))
+	when returnp
+	  return (list slot-name
+		       (cadr returnp)
+		       type)))
 
 (defun create-definer-code (name create-arguments return-argument)
-  (iter (for arg in create-arguments)
-    (when (cadddr (cdr arg))
-      (collect (name-des-symbol (car arg)) into lisp-args))
-    (when (cadr arg)
-      (collect (cadr arg) into lisp-create-exprs))
-    (when (cadddr arg)
-      (collect (name-des-symbol (car arg)) into foreign-args)
-      (collect (caddr arg) into foreign-types))
-    (finally (let* ((callback-name (gensym))
-		    (callback-body (gensym))
-		    (return-ftype (caddr return-argument))
-		    (callback-args (mapcar (lambda (x) (gensym (string x))) foreign-args))
-		    (lisp-args-callback-args (apply #'append (mapcar #'list lisp-args callback-args)))
-		    (callback-create-exprs (mapcar (lambda (x) (rec-substitute lisp-args-callback-args x)) lisp-create-exprs))
-		    (user-lisp-args (gensym))
-		    (callback-let-create-exprs (gensym))
-		    (callback-args-types (mapcar #'list callback-args foreign-types))
-		    (callback-return-sym (gensym))
-		    (lisp-return-expr (cadr return-argument))
-		    (lisp-return-sym (name-des-symbol (car return-argument)))
-		    (callback-return-expr (rec-substitute (list lisp-return-sym callback-return-sym) lisp-return-expr)))
-	       (return `(defmacro ,(name-des-symbol name) (,callback-name ,lisp-args &body ,callback-body)
-			  (let* ((,user-lisp-args ,(cons 'list lisp-args))
-				 (,callback-let-create-exprs (mapcar #'list ,user-lisp-args ',callback-create-exprs)))
-			    `(cffi:defcallback ,,callback-name ,',return-ftype ,',callback-args-types
-			       (let ((,',callback-return-sym (let ,,callback-let-create-exprs
-							       ,@,callback-body)))
-				 ,',callback-return-expr)))))))))
+  (loop for (slot-name create-expr type foreign-arg lisp-arg) in create-arguments
+	when lisp-arg
+	  collect slot-name into lisp-args
+	when create-expr
+	  collect create-expr into lisp-create-exprs
+	when foreign-arg
+	  collect slot-name into foreign-args
+	  and collect type into foreign-types
+	finally (with-gensyms (callback-name callback-body user-lisp-args callback-let-create-exprs callback-return-sym)
+		  (destructuring-bind (slot-name return-expr ret-type) return-argument
+		    (let* ((callback-args (mapcar (lambda (x) (gensym (symbol-name x))) foreign-args))
+			   (lisp-args-callback-args (mapcan #'list lisp-args callback-args))
+			   (callback-create-exprs (mapcar (lambda (x) (rec-substitute lisp-args-callback-args x)) lisp-create-exprs))
+			   (callback-args-types (mapcar #'list callback-args foreign-types))
+			   (callback-return-expr (rec-substitute (list slot-name callback-return-sym) return-expr)))
+		      (return `(defmacro ,(name-des-symbol name) (,callback-name ,lisp-args &body ,callback-body)
+				 (let* ((,user-lisp-args ,(cons 'list lisp-args))
+					(,callback-let-create-exprs (mapcar #'list ,user-lisp-args ',callback-create-exprs)))
+				   `(cffi:defcallback ,,callback-name ,',return-ftype ,',callback-args-types
+				      (let ((,',callback-return-sym (let ,,callback-let-create-exprs
+								      ,@,callback-body)))
+					,',callback-return-expr))))))))))
 
-(defun extract-doc-create-info (arg-descriptors)
-  (iter (for arg-descriptor in arg-descriptors)
-    (when (and (not (member :return arg-descriptor)) (or (not (member :create arg-descriptor)) (cadr (member :create arg-descriptor))))
-      (let ((doc-typep (member :type arg-descriptor)))
-	(if doc-typep
-	    (collect (list (car arg-descriptor) (cadr doc-typep) t))
-	    (collect (list (car arg-descriptor) nil nil)))))))
+(adp:defmacro def-foreign-callback-definer (name &body arg-descriptors)
+  "Define a macro named NAME to define callbacks. Each ARG-DESCRIPTOR must have the following syntax:
 
-(defun extract-doc-return-info (arg-descriptors)
-  (iter (for arg-descriptor in arg-descriptors)
-    (when (member :return arg-descriptor)
-      (let ((doc-typep (member :type arg-descriptor)))
-	(if doc-typep
-	    (return (list (car arg-descriptor) (cadr doc-typep) t))
-	    (return (list (car arg-descriptor) nil nil)))))))
+  ARG-DESCRIPTOR ::= (SLOT-NAME [[slot-option]])
+  SLOT-OPTION    ::= {:create expr | :return expr}1 | {:type type}1 | :virtual expr
 
-(defmacro def-foreign-callback-definer (file foreign-type name &body arg-descriptors)
-  (check-definer-name name)
+; Arreglar explicando conceptos de Lisp-args y C-args
+The :CREATE option indicates the slot to be an argument in the callback or not. If an expression is non-nil
+in :CREATE then it must be a C-to-Lisp translation of that argument. In contrast, if that expression is nil, then
+the slot will not be an argument. On the other hand, if :RETURN is used, then the slot will
+be the callback returned value. The expression from :RETURN is a Lisp-to-C translation of that value. There can only be
+one slot using the :RETURN option. There must be as many slots using :CREATE as arguments the callback has. However, you can
+add extra "
+  (check-type name symbol)
   (check-arg-descriptors arg-descriptors)
-  `(progn
-     ,(create-definer-code name
-			   (extract-create-arguments arg-descriptors)
-			   (extract-return-argument arg-descriptors))
-     ,@(when *export-symbols*
-	 `((export ',(name-des-symbol name))))
-     ,@(when (and *doc-generation* file)
-	 `((doc-foreign-callback-definer ',foreign-type ',name ',(extract-doc-create-info arg-descriptors)
-					 ',(extract-doc-return-info arg-descriptors) ,file)))))
+  (create-definer-code name
+		       (extract-create-arguments arg-descriptors)
+		       (extract-return-argument arg-descriptors)))
+
+
+;; -------------------
+;; ----- defcfun -----
+;; -------------------
+
+(adp:defmacro defcfun ((foreign-name name &optional (funcall-name nil)) return-type &body arguments)
+  "Define a function or functions that call the foreign function with name FOREIGN-NAME. If NAME is specified, a 
+function that call the foreign function is defined. If FUNCALL-NAME is specified, another function is defined 
+which receive an extra parameter at the beginning. That extra parameter must be a foreign pointer to the foreign 
+function. "
+  (check-type foreign-name string)
+  (check-type name symbol)
+  (check-type funcall-name symbol)
+  (loop for argument in arguments
+	unless (and (listp argument)
+		    (equal (length argument) 2)
+		    (symbolp (car argument)))
+	  do (error "Expected a list with a symbol and a foreign type. Found: ~s" argument))
+  (assert (or name funcall-name) () "MORE-CFFI:defcfun : name and funcall-name are both nil")
+  (multiple-value-bind (docstring real-arguments) (if (stringp (car arguments))
+						      (values (car arguments) (cdr arguments))
+						      (values nil arguments))
+    (let ((name-args (mapcar #'car real-arguments))
+	  (ordered-args (mapcan (lambda (arg) (list (cadr arg) (car arg))) real-arguments)))
+      (with-gensyms (func-ptr)
+	`(progn
+	   ,@(when name
+	       `((defun ,name ,name-args
+		   ,@(when docstring `(,docstring))
+		   (cffi:foreign-funcall ,foreign-name ,@ordered-args ,return-type))))
+	   ,@(when funcall-name
+	       `((defun ,funcall-name ,(cons func-ptr name-args)
+		   ,@(when docstring `(,docstring))
+		   (cffi:foreign-funcall-pointer ,func-ptr () ,@ordered-args ,return-type)))))))))
 
 
 ;; --------------------------------
@@ -982,43 +367,6 @@
 		  `(export ',funcall-name-sym))))
 	 ,(when (and *doc-generation* file)
 	    `(doc-foreign-function ',foreign-name ',name ',docstring ',args ',type-declarations ',return-declarations ,file))))))
-
-
-;; --------------------------
-;; ----- def-foreign-macro -----
-;; --------------------------
-
-(defun check-foreign-macro-foreign-name (foreign-name)
-  (unless (name-desp foreign-name)
-    (error "Expected a name designator.~%Found:~%   ~s" foreign-name)))
-
-(defun check-foreign-macro-name (name)
-  (unless (name-desp name)
-    (error "Expected a name designator.~%Found:~%   ~s" name)))
-
-(defun check-foreign-macro-args (args)
-  (unless (and (listp args)
-	       (iter (for arg in args)
-		 (always (symbolp arg))))
-    (error "Expected a list of symbols.~%Found:~%   ~s" args)))
-
-(defun extract-foreign-macro-docstring (body)
-  (if (stringp (car body))
-      (car body)
-      nil))
-
-(defmacro def-foreign-macro (file (foreign-name name) args &body body)
-  (check-foreign-macro-foreign-name foreign-name)
-  (check-foreign-macro-name name)
-  (check-foreign-macro-args args)
-  (let ((docstring (extract-foreign-macro-docstring body)))
-    `(progn
-       (defmacro ,(name-des-symbol name) ,args
-	 ,@body)
-       ,@(when *export-symbols*
-	   `((export ',(name-des-symbol name))))
-       ,@(when (and *doc-generation* file)
-	   `((doc-foreign-macro ',foreign-name ',name ',args ',docstring ,file))))))
 
 
 ;; ------------------------------
