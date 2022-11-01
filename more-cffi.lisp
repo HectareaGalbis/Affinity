@@ -66,13 +66,11 @@
 
 When using this new macro CREATE is called with ARGS and the results are stored in VAR-OR-VARS. If VAR-OR-VARS
 is a symbol, the rest of returned values are ignored. Afterwards, the BODY forms are evaluated. Finally, 
-DESTROY is called. The arguments used by DESTROY depends on DESTRCUTOR-ARITY and DESTRUCTOR-ARGUMENTS. If
-DESTRUCTOR-ARGUMENTS is specified, it must be a list of non-negative integers denoting the arguments returned
-by CREATE to be used by DESTROY in the order they appear. For example, using the list (3 0 2) indicates that
-DESTROY will receive the fourth, first and third values returned by CREATE and in that order. If this parameter
-is not used but DESTRUCTOR-ARITY is, then it must be a non-negative integer indicating the number of arguments
-to be used by DESTROY. For example, if 2 is specified as the DESTRUCTOR-ARITY, then
-DESTROY will receive the first 2 values returned by CREATE."  
+DESTROY is called. The arguments used by DESTROY depends on ARITY. If ARITY is a list of non-negative integers
+then they denote the arguments returned by CREATE to be used by DESTROY in the order they appear. For example, 
+using the list (3 0 2) indicates that DESTROY will receive the fourth, first and third values returned by CREATE 
+and in that order. If ARITY is just a non-negative integer then it indicates the number of arguments
+to be used by DESTROY. For example, if 2 is specified, then DESTROY will receive the first 2 values returned by CREATE."  
   (check-type name symbol)
   (check-type create symbol)
   (check-type destroy symbol)
