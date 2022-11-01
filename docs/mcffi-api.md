@@ -5,6 +5,7 @@
   ...)
 ```
 
+````
 Define a macro named NAME. This new macro has the following syntax:
 
   (NAME var-or-vars (&rest args) &body body)
@@ -18,6 +19,7 @@ DESTROY will receive the fourth, first and third values returned by CREATE and i
 is not used but DESTRUCTOR-ARITY is, then it must be a non-negative integer indicating the number of arguments
 to be used by DESTROY. For example, if 2 is specified as the DESTRUCTOR-ARITY, then
 DESTROY will receive the first 2 values returned by CREATE.
+````
 
 #### Macro: DEFINE-FOREIGN-CALLBACK-DEFINER
 
@@ -26,6 +28,7 @@ DESTROY will receive the first 2 values returned by CREATE.
   ...)
 ```
 
+````
 Define a macro named NAME to define callbacks. Each ARG-DESCRIPTOR must have the following syntax:
 
   ARG-DESCRIPTOR ::= (SLOT-NAME [[slot-option]])
@@ -46,6 +49,7 @@ You can use :RETURN instead of :CREATE to indicate SLOT-NAME is not a callback a
 
 The last available option is :VIRTUAL. Using this option indicates that SLOT-NAME is not a C-arg but will be a Lisp arg. You should use
 :CREATE and an expression using the rest of SLOT-NAMEs.
+````
 
 #### Macro: DEFCFUN
 
@@ -55,10 +59,12 @@ The last available option is :VIRTUAL. Using this option indicates that SLOT-NAM
   ...)
 ```
 
+````
 Define a function or functions that call the foreign function with name FOREIGN-NAME. If NAME is specified, a 
 function that call the foreign function is defined. If FUNCALL-NAME is specified, another function is defined 
 which receive an extra parameter at the beginning. That extra parameter must be a foreign pointer to the foreign 
 function. 
+````
 
 #### Macro: DEFINE-FOREIGN-FUNCTION
 
@@ -69,11 +75,13 @@ function.
   ...)
 ```
 
+````
 Define at most two functions named NAME and FUNCALL-NAME. The symbol FOREIGN-NAME must be used in the BODY forms.
 If NAME is non-NIL a function named NAME is defined as normally. If FOREIGN-FUNCALL-NAME and FUNCALL-NAME are non-NIL
 a function named FUNCALL-NAME is defined. It is like NAME but receives an extra parameter that must be a pointer to the
 foreign function represented by FOREIGN-NAME and FOREIGN-FUNCALL-NAME. Also, each call to FOREIGN-NAME is substituted by
 FOREIGN-FUNCALL-NAME.
+````
 
 #### Macro: DEFINE-FOREIGN-STRUCT
 
@@ -83,6 +91,7 @@ FOREIGN-FUNCALL-NAME.
   ...)
 ```
 
+````
 Define a wraper around the foreign struct (or union) STRUCT-TYPE. The symbol INFIX is used to generate the function names.
 OPTIONS is a list of keywords that modify the way this macro works. 
 
@@ -122,4 +131,5 @@ specify the translations of each member:
   - POINTER: Some structs have as a member another struct. You may want to use its pointer rather than the struct itself. To do that you only need to
              use a non-NIL expression after :pointer.
   - VIRTUAL: Using :virtual you can receive an additional parameter in the constructor, or create additional accessors.
+````
 
