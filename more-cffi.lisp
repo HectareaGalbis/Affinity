@@ -4,6 +4,8 @@
 
 (adp:write-in-file #P"docs/mcffi-api")
 
+(adp:header "More-cffi API")
+
 ;; ----------------------------
 ;; ----- Helper functions -----
 ;; ----------------------------
