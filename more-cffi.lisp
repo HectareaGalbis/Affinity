@@ -10,18 +10,8 @@
 ;; ----- Helper functions -----
 ;; ----------------------------
 
-;; memset from C standard library
-(cffi:defcfun "memset" :pointer
-  (str :pointer) (c :int) (n :size))
-
-
-;; memcpy from C standard library
-(cffi:defcfun "memcpy" :pointer
-  (dest :pointer) (src :pointer) (n :size))
-
-
-;; Return the list of symbols from slot-names that appear in expr
 (defun find-slot-names (slot-names expr)
+  "Return the list of symbols from slot-names that appear in expr"
   (labels ((find-slot-names-aux (names l names-found)
 	     (cond
                ((and (symbolp l) (member l names)) (adjoin l names-found))
@@ -29,32 +19,18 @@
                (t names-found))))
     (find-slot-names-aux slot-names expr nil)))
 
-
-;; Return a non-nil value if there is some symbol from syms in l
 (defun exists-rec (syms l)
+  "Return a non-nil value if there is some symbol from syms in l"
   (if (consp l)
       (or (exists-rec syms (car l)) (exists-rec syms (cdr l)))
       (member l syms)))
 
-
-;; Return a list of lists which their first element is the symbol sym
-(defun find-many-rec (sym l)
-  (if (listp l)
-      (if (eq sym (car l))
-	  (list l)
-	  (iter (for elem in l)
-	    (appending (find-many-rec sym elem))))
-      nil))
-
-
-;; Substitute every ocurrence of each symbol in assoc-symbol by
-;; its associated symbol. assoc-symbols is a property list.
 (defun rec-substitute (assoc-symbols l)
+  "Substitute every ocurrence of each symbol in assoc-symbol by its associated symbol. assoc-symbols is a property list."
   (cond
     ((and (symbolp l) (member l assoc-symbols)) (getf assoc-symbols l))
     ((consp l) (cons (rec-substitute assoc-symbols (car l)) (rec-substitute assoc-symbols (cdr l))))
     (t l)))
-
 
 
 ;; -------------------

@@ -1,28 +1,19 @@
+# More-cffi
 
-# more-cffi
+This project defines some macros that help you to create wrappers to foreign functions, callbacks and structs. Also, it supports [ADP](https://github.com/Hectarea1996/adp) to generate automatic documentation.
 
-This project can be seen as an extension of the cffi project. Specifically, this defines some macros and symbols to create documented bindings.
+* [More-cffi](/README.md#more-cffi)
+  * [Description](/README.md#description)
+* [More-cffi API](/docs/mcffi-api.md#more-cffi-api)
 
 ## Description
 
-Sometimes wrapping a library is difficult and the way how things must be done is not always clear. This library will help you to define good and documented bindings writing just the necessary information. Also, it tries to create said bindings with the least possible transformations between Lisp and C as possible. In fact, the user will use raw pointers when creating a struct (they won't know). However, this has a counterpart: Sometimes, totally escaping the world of C is impossible and we need to deal with it. In C, objects have to be explicitly destroyed and with this library you will too. For that reason, some macros (`with-` macros) come to the rescue to make things a bit easier. The main macros exported by `more-cffi` are:
+Wrapping a foreign library using CFFI is difficult and the way how things must be done is not always clear. This project exports some utility macros to define such wrappers.
 
-* `defcfun`: A mix of `cffi:defcfun` and `cffi:foreign-funcall-pointer`.
-* `defwith`: Define `with-` macros.
-* `def-lisp-function`: Define a lisp function.
-* `def-lisp-macro`: Define a lisp macro.
-* `def-foreign-constant`: Define constants.
-* `def-foreign-enum`: Define enums.
-* `def-foreign-callback-definer`: Define callback definers.
-* `def-foreign-function`: Define a function wrapper.
-* `def-foreign-struct`: Define a struct wrapper.
-* `def-foreign-union`: Define a union wrapper.
-
-Each of these macros writes documentation if you enable it. Finally, this library exports some C functions to manage data allocated by C. For more information, see:
-
-* [Reference API](https://github.com/Hectarea1996/more-cffi/blob/main/API.md)
-* [A brief guide](https://github.com/Hectarea1996/more-cffi/blob/main/Guide.md)
-
-
-
+* D
+  * [MCFFI:DEFCFUN](/docs/mcffi-api.md#macro-defcfun)
+  * [MCFFI:DEFINE-FOREIGN-CALLBACK-DEFINER](/docs/mcffi-api.md#macro-define-foreign-callback-definer)
+  * [MCFFI:DEFINE-FOREIGN-FUNCTION](/docs/mcffi-api.md#macro-define-foreign-function)
+  * [MCFFI:DEFINE-FOREIGN-STRUCT](/docs/mcffi-api.md#macro-define-foreign-struct)
+  * [MCFFI:DEFWITH](/docs/mcffi-api.md#macro-defwith)
 

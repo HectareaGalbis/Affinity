@@ -24,7 +24,7 @@ to be used by DESTROY. For example, if 2 is specified, then DESTROY will receive
 #### Macro: DEFINE-FOREIGN-CALLBACK-DEFINER
 
 ```Lisp
-(defmacro DEFINE-FOREIGN-CALLBACK-DEFINER (NAME &BODY ARG-DESCRIPTORS)
+(defmacro MCFFI:DEFINE-FOREIGN-CALLBACK-DEFINER (NAME &BODY ARG-DESCRIPTORS)
   ...)
 ```
 
@@ -69,9 +69,9 @@ function.
 #### Macro: DEFINE-FOREIGN-FUNCTION
 
 ```Lisp
-(defmacro DEFINE-FOREIGN-FUNCTION ((FOREIGN-NAME NAME &OPTIONAL
-                                    FOREIGN-FUNCALL-NAME FUNCALL-NAME)
-                                   ARGS &BODY BODY)
+(defmacro MCFFI:DEFINE-FOREIGN-FUNCTION ((FOREIGN-NAME NAME &OPTIONAL
+                                          FOREIGN-FUNCALL-NAME FUNCALL-NAME)
+                                         ARGS &BODY BODY)
   ...)
 ```
 
@@ -86,8 +86,8 @@ FOREIGN-FUNCALL-NAME.
 #### Macro: DEFINE-FOREIGN-STRUCT
 
 ```Lisp
-(defmacro DEFINE-FOREIGN-STRUCT (STRUCT-TYPE INFIX OPTIONS &BODY
-                                 SLOT-DESCRIPTORS)
+(defmacro MCFFI:DEFINE-FOREIGN-STRUCT (STRUCT-TYPE INFIX OPTIONS &BODY
+                                       SLOT-DESCRIPTORS)
   ...)
 ```
 
