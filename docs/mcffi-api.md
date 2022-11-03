@@ -51,38 +51,6 @@ The last available option is :VIRTUAL. Using this option indicates that SLOT-NAM
 :CREATE and an expression using the rest of SLOT-NAMEs.
 ````
 
-#### Macro: DEFCFUN
-
-```Lisp
-(defmacro MCFFI:DEFCFUN ((FOREIGN-NAME NAME &OPTIONAL (FUNCALL-NAME NIL))
-                         RETURN-TYPE &BODY ARGUMENTS)
-  ...)
-```
-
-````
-Define a function or functions that call the foreign function with name FOREIGN-NAME. If NAME is specified, a 
-function that call the foreign function is defined. If FUNCALL-NAME is specified, another function is defined 
-which receive an extra parameter at the beginning. That extra parameter must be a foreign pointer to the foreign 
-function. 
-````
-
-#### Macro: DEFINE-FOREIGN-FUNCTION
-
-```Lisp
-(defmacro MCFFI:DEFINE-FOREIGN-FUNCTION ((FOREIGN-NAME NAME &OPTIONAL
-                                          FOREIGN-FUNCALL-NAME FUNCALL-NAME)
-                                         ARGS &BODY BODY)
-  ...)
-```
-
-````
-Define at most two functions named NAME and FUNCALL-NAME. The symbol FOREIGN-NAME must be used in the BODY forms.
-If NAME is non-NIL a function named NAME is defined as normally. If FOREIGN-FUNCALL-NAME and FUNCALL-NAME are non-NIL
-a function named FUNCALL-NAME is defined. It is like NAME but receives an extra parameter that must be a pointer to the
-foreign function represented by FOREIGN-NAME and FOREIGN-FUNCALL-NAME. Also, each call to FOREIGN-NAME is substituted by
-FOREIGN-FUNCALL-NAME.
-````
-
 #### Macro: DEFINE-FOREIGN-STRUCT
 
 ```Lisp

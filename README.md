@@ -11,9 +11,7 @@ This project defines some macros that help you to create wrappers to foreign fun
 Wrapping a foreign library using CFFI is difficult and the way how things must be done is not always clear. This project exports some utility macros to define such wrappers.
 
 * D
-  * [MCFFI:DEFCFUN](/docs/mcffi-api.md#macro-defcfun)
   * [MCFFI:DEFINE-FOREIGN-CALLBACK-DEFINER](/docs/mcffi-api.md#macro-define-foreign-callback-definer)
-  * [MCFFI:DEFINE-FOREIGN-FUNCTION](/docs/mcffi-api.md#macro-define-foreign-function)
   * [MCFFI:DEFINE-FOREIGN-STRUCT](/docs/mcffi-api.md#macro-define-foreign-struct)
   * [MCFFI:DEFWITH](/docs/mcffi-api.md#macro-defwith)
 
