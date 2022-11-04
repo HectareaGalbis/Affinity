@@ -21,10 +21,10 @@ and in that order. If ARITY is just a non-negative integer then it indicates the
 to be used by DESTROY. For example, if 2 is specified, then DESTROY will receive the first 2 values returned by CREATE.
 ````
 
-#### Macro: DEFINE-FOREIGN-CALLBACK-DEFINER
+#### Macro: DEFINE-CALLBACK-DEFINER
 
 ```Lisp
-(defmacro MCFFI:DEFINE-FOREIGN-CALLBACK-DEFINER (NAME &BODY ARG-DESCRIPTORS)
+(defmacro MCFFI:DEFINE-CALLBACK-DEFINER (NAME &BODY ARG-DESCRIPTORS)
   ...)
 ```
 

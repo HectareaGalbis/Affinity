@@ -78,9 +78,9 @@ to be used by DESTROY. For example, if 2 is specified, then DESTROY will receive
 					    ``(subseq ,,ret-list-sym 0 ,',destructor-arity)))))))))))
 
 
-;; -------------------------------------------
-;; ----- define-foreign-callback-definer -----
-;; -------------------------------------------
+;; -----------------------------------
+;; ----- define-callback-definer -----
+;; -----------------------------------
 
 (defun check-callback-definer-arg-descriptor (arg-descriptor)
   (assert (and (listp arg-descriptor)
@@ -180,7 +180,7 @@ whether is a foreign argument and whether is a lisp argument."
 								      ,@,callback-body)))
 					,',callback-return-expr))))))))))
 
-(adp:defmacro define-foreign-callback-definer (name &body arg-descriptors)
+(adp:defmacro define-callback-definer (name &body arg-descriptors)
   "Define a macro named NAME to define callbacks. Each ARG-DESCRIPTOR must have the following syntax:
 
   ARG-DESCRIPTOR ::= (SLOT-NAME [[slot-option]])

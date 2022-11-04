@@ -4,7 +4,5 @@
   (:use :cl :alexandria :iterate)
   (:nicknames :mcffi)
   (:export #:defwith
-	   #:define-foreign-callback-definer
-	   #:defcfun
-	   #:define-foreign-function
+	   #:define-callback-definer
 	   #:define-foreign-struct))
