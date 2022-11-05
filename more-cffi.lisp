@@ -156,7 +156,7 @@ whether is a foreign argument and whether is a lisp argument."
 		       (cadr returnp)
 		       type)))
 
-(defun create-definer-code (name create-arguments return-argument)
+(defun create-definer-code (name docstring create-arguments return-argument)
   (loop for (slot-name create-expr type foreign-arg lisp-arg) in create-arguments
 	when lisp-arg
 	  collect slot-name into lisp-args
@@ -173,6 +173,8 @@ whether is a foreign argument and whether is a lisp argument."
 			   (callback-args-types (mapcar #'list callback-args foreign-types))
 			   (callback-return-expr (rec-substitute (list slot-name callback-return-sym) return-expr)))
 		      (return `(adp:defmacro ,name (,callback-name ,lisp-args &body ,callback-body)
+				 ,@(when docstring
+				     `(,docstring))
 				 (let* ((,user-lisp-args ,(cons 'list lisp-args))
 					(,callback-let-create-exprs (mapcar #'list ,user-lisp-args ',callback-create-exprs)))
 				   `(cffi:defcallback ,,callback-name ,',ret-type ,',callback-args-types
@@ -203,9 +205,16 @@ The last available option is :VIRTUAL. Using this option indicates that SLOT-NAM
 :CREATE and an expression using the rest of SLOT-NAMEs."
   (check-type name symbol)
   (check-callback-definer-arg-descriptors arg-descriptors)
-  (create-definer-code name
-		       (extract-create-arguments arg-descriptors)
-		       (extract-return-argument arg-descriptors)))
+  (let ((docstring (if (stringp (car arg-descriptors))
+		       (car arg-descriptors)
+		       nil))
+	(real-arg-descriptors (if (stringp (car arg-descriptors))
+				  (cdr arg-descriptors)
+				  arg-descriptors)))
+    (create-definer-code name
+			 docstring
+			 (extract-create-arguments real-arg-descriptors)
+			 (extract-return-argument real-arg-descriptors))))
 
 
 ;; ---------------------------------
