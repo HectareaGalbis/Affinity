@@ -32,6 +32,9 @@
     ((consp l) (cons (rec-substitute assoc-symbols (car l)) (rec-substitute assoc-symbols (cdr l))))
     (t l)))
 
+(cffi:defcfun "memset" :pointer
+  (str :pointer) (c :int) (n :size))
+
 
 ;; -------------------
 ;; ----- defwith -----  
@@ -165,22 +168,27 @@ whether is a foreign argument and whether is a lisp argument."
 	when foreign-arg
 	  collect slot-name into foreign-args
 	  and collect type into foreign-types
-	finally (with-gensyms (callback-name callback-body user-lisp-args callback-let-create-exprs callback-return-sym)
-		  (destructuring-bind (slot-name return-expr ret-type) return-argument
-		    (let* ((callback-args (mapcar (lambda (x) (gensym (symbol-name x))) foreign-args))
-			   (lisp-args-callback-args (mapcan #'list lisp-args callback-args))
-			   (callback-create-exprs (mapcar (lambda (x) (rec-substitute lisp-args-callback-args x)) lisp-create-exprs))
-			   (callback-args-types (mapcar #'list callback-args foreign-types))
-			   (callback-return-expr (rec-substitute (list slot-name callback-return-sym) return-expr)))
-		      (return `(adp:defmacro ,name (,callback-name ,lisp-args &body ,callback-body)
-				 ,@(when docstring
-				     `(,docstring))
-				 (let* ((,user-lisp-args ,(cons 'list lisp-args))
-					(,callback-let-create-exprs (mapcar #'list ,user-lisp-args ',callback-create-exprs)))
-				   `(cffi:defcallback ,,callback-name ,',ret-type ,',callback-args-types
-				      (let ((,',callback-return-sym (let ,,callback-let-create-exprs
-								      ,@,callback-body)))
-					,',callback-return-expr))))))))))
+	finally (with-gensyms (callback-name callback-body user-lisp-args callback-let-create-exprs)
+		  (let* ((callback-args (mapcar (lambda (x) (gensym (symbol-name x))) foreign-args))
+			 (lisp-args-callback-args (mapcan #'list lisp-args callback-args))
+			 (callback-create-exprs (mapcar (lambda (x) (rec-substitute lisp-args-callback-args x)) lisp-create-exprs))
+			 (callback-args-types (mapcar #'list callback-args foreign-types)))
+		    (return `(adp:defmacro ,name (,callback-name ,lisp-args &body ,callback-body)
+			       ,@(when docstring
+				   `(,docstring))
+			       (let* ((,user-lisp-args ,(cons 'list lisp-args))
+				      (,callback-let-create-exprs (mapcar #'list ,user-lisp-args ',callback-create-exprs)))
+				 ,(if return-argument
+				      (multiple-value-bind (slot-name return-expr ret-type) return-argument
+					(with-gensyms (callback-return-sym)
+					  (let ((callback-return-expr (rec-substitute (list slot-name callback-return-sym) return-expr)))
+					    ``(cffi:defcallback ,,callback-name ,',ret-type ,',callback-args-types
+						(let ((,',callback-return-sym (let ,,callback-let-create-exprs
+										,@,callback-body)))
+						  ,',callback-return-expr)))))
+				      ``(cffi:defcallback ,,callback-name :void ,',callback-args-types
+					  (let ,,callback-let-create-exprs
+					    ,@,callback-body))))))))))
 
 (adp:defmacro define-callback-definer (name &body arg-descriptors)
   "Define a macro named NAME to define callbacks. Each ARG-DESCRIPTOR must have the following syntax:
@@ -204,13 +212,13 @@ You can use :RETURN instead of :CREATE to indicate SLOT-NAME is not a callback a
 The last available option is :VIRTUAL. Using this option indicates that SLOT-NAME is not a C-arg but will be a Lisp arg. You should use
 :CREATE and an expression using the rest of SLOT-NAMEs."
   (check-type name symbol)
-  (check-callback-definer-arg-descriptors arg-descriptors)
   (let ((docstring (if (stringp (car arg-descriptors))
 		       (car arg-descriptors)
 		       nil))
 	(real-arg-descriptors (if (stringp (car arg-descriptors))
 				  (cdr arg-descriptors)
 				  arg-descriptors)))
+    (check-callback-definer-arg-descriptors real-arg-descriptors)
     (create-definer-code name
 			 docstring
 			 (extract-create-arguments real-arg-descriptors)
@@ -319,8 +327,8 @@ The last available option is :VIRTUAL. Using this option indicates that SLOT-NAM
 	    (loop for rest-slot-options on slot-options by #'cddr
 		  for option-type = (car rest-slot-options)
 		  for option-value = (cadr rest-slot-options)
-		  do (assert (member option-type '(:name :type :initform :pointer :virtual :constructor :destructor :reader :writer)) ()
-			     "Expected :name, :type, :initform, :pointer, :virtual, :constructor, :destructor, :reader or :writer in ~S descriptor.~%Found:~%   ~S"
+		  do (assert (member option-type '(:name :initform :pointer :virtual :constructor :destructor :reader :writer)) ()
+			     "Expected :name, :initform, :pointer, :virtual, :constructor, :destructor, :reader or :writer in ~S descriptor.~%Found:~%   ~S"
 			     slot-name option-type) 
 		     (case option-type
 		       (:name
@@ -351,7 +359,7 @@ The last available option is :VIRTUAL. Using this option indicates that SLOT-NAM
     (t (let ((key-expr (member keyword descriptor)))
 	 (list slot-name nil (cadr key-expr) (and key-expr t))))))
 
-(defun create-constructor-code (constructor-infos pointer-slots name-infos initform-infos type-infos struct-type
+(defun create-constructor-code (constructor-infos pointer-slots name-infos initform-infos struct-type
 				enable-default-constructors enable-invisibles suffix)
   (let ((slot-names (cffi:foreign-slot-names struct-type)))
     (iter
@@ -362,9 +370,6 @@ The last available option is :VIRTUAL. Using this option indicates that SLOT-NAM
 	(collect slot-name into used-slots))
       (when (and (or enable-invisibles (not invisiblep))
 		 (or constructor (and enable-default-constructors (not constructorp))))
-	(let ((typep (member slot-name type-infos :key #'car)))
-	  (when typep 
-	    (collect `(type (,(cadar typep) ,(caar typep))) into type-declarations)))
 	(if constructorp
 	    (when (not (null (car constructor)))
 	      (let* ((namep (member slot-name name-infos :key #'car))
@@ -398,7 +403,6 @@ The last available option is :VIRTUAL. Using this option indicates that SLOT-NAM
 			   `(adp:defun ,(intern (concatenate 'string "CREATE-" (string-upcase (symbol-name suffix))))
 				(&key ,@constructor-parameters)
 			      ,(format nil "Constructor of ~s." suffix)
-			      (declare ,@type-declarations)
 			      (let ((,object-sym (cffi:foreign-alloc ',struct-type)))
 				(memset ,object-sym 0 (cffi:foreign-type-size ',struct-type))
 				(cffi:with-foreign-slots (,final-used-slots ,object-sym ,struct-type)
@@ -451,7 +455,7 @@ The last available option is :VIRTUAL. Using this option indicates that SLOT-NAM
 		      (cffi:with-foreign-slots (,final-used-slots ,(car args) ,struct-type)
 			,final-reader))))))))
 
-(defun create-writers-code (writer-infos pointer-slots name-infos type-infos struct-type
+(defun create-writers-code (writer-infos pointer-slots name-infos struct-type
 			    enable-default-writers enable-invisibles prefix)
   (let ((slot-names (cffi:foreign-slot-names struct-type)))
     (iter (for (slot-name invisiblep writer writerp) in writer-infos)
@@ -469,12 +473,9 @@ The last available option is :VIRTUAL. Using this option indicates that SLOT-NAM
 							 x))
 					 used-slots))
 	       (namep (member slot-name name-infos :key #'car))
-	       (name (if namep (cadar namep) slot-name))
-	       (typep (member slot-name type-infos :key #'car))
-	       (type-declaration `(type ,(cadar typep) ,(caar typep))))
+	       (name (if namep (cadar namep) slot-name)))
 	  (collect `(adp:defun (setf ,(intern (concatenate 'string (symbol-name prefix) "-" (symbol-name name))))
 		      ,args
-		      (declare ,type-declaration)
 		      (cffi:with-foreign-slots (,final-used-slots ,object-arg ,struct-type)
 			,final-writer))))))))
 
@@ -492,16 +493,12 @@ The last available option is :VIRTUAL. Using this option indicates that SLOT-NAM
 	  for pointer-value =  (cadr pointerp)
 	  for namep =          (member :name slot-descriptor)
 	  for name-value =     (cadr namep)
-	  for typep =          (member :type slot-descriptor)
-	  for type-value =     (cadr typep)
 	  for initformp =      (member :initform slot-descriptor)
 	  for initform-value = (cadr initformp)
 	  when pointer-value
 	    collect slot-name                                                         into pointer-slots
 	  when namep
 	    collect (list slot-name name-value)                                       into name-infos
-	  when typep
-	    collect (list slot-name type-value)                                       into type-infos
 	  when initformp
 	    collect (list slot-name initform-value)                                   into initform-infos
 	  when (not no-constructorp)
@@ -513,7 +510,7 @@ The last available option is :VIRTUAL. Using this option indicates that SLOT-NAM
 	  finally (return `(progn
 			     ,@(unless no-constructorp
 				 (list (create-constructor-code constructor-infos pointer-slots name-infos
-								initform-infos type-infos struct-type
+								initform-infos struct-type
 								default-constructorp
 								invisiblesp
 								infix)))
@@ -524,7 +521,7 @@ The last available option is :VIRTUAL. Using this option indicates that SLOT-NAM
 				 (list (create-with-code infix)))
 			     ,@(create-readers-code reader-infos pointer-slots name-infos struct-type
 						    default-readerp invisiblesp infix)
-			     ,@(create-writers-code writer-infos pointer-slots name-infos type-infos struct-type
+			     ,@(create-writers-code writer-infos pointer-slots name-infos struct-type
 						     default-writerp invisiblesp infix))))))
 
 (adp:defmacro define-foreign-struct (struct-type infix options &body slot-descriptors)
