@@ -1,6 +1,6 @@
-# More-cffi API
+<h1 id="header:ADP:HEADERTAG0">More-cffi API</h1>
 
-#### Macro: DEFWITH
+<h4 id="function:MORE-CFFI:DEFWITH">Macro: DEFWITH</h4>
 
 ```Lisp
 (defmacro MCFFI:DEFWITH (NAME CREATE DESTROY &OPTIONAL (ARITY 1) DOCSTRING)
@@ -21,7 +21,7 @@ and in that order. If ARITY is just a non-negative integer then it indicates the
 to be used by DESTROY. For example, if 2 is specified, then DESTROY will receive the first 2 values returned by CREATE.
 ````
 
-#### Macro: DEFINE-CALLBACK-DEFINER
+<h4 id="function:MORE-CFFI:DEFINE-CALLBACK-DEFINER">Macro: DEFINE-CALLBACK-DEFINER</h4>
 
 ```Lisp
 (defmacro MCFFI:DEFINE-CALLBACK-DEFINER (NAME &BODY ARG-DESCRIPTORS)
@@ -51,7 +51,7 @@ The last available option is :VIRTUAL. Using this option indicates that SLOT-NAM
 :CREATE and an expression using the rest of SLOT-NAMEs.
 ````
 
-#### Macro: DEFINE-FOREIGN-STRUCT
+<h4 id="function:MORE-CFFI:DEFINE-FOREIGN-STRUCT">Macro: DEFINE-FOREIGN-STRUCT</h4>
 
 ```Lisp
 (defmacro MCFFI:DEFINE-FOREIGN-STRUCT (STRUCT-TYPE INFIX OPTIONS &BODY
