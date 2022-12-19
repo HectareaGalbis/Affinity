@@ -1,7 +1,7 @@
 
 (in-package :mcffi)
 
-(adp:write-in-file #P"README.md")
+(adp:in-file #P"README.md")
 
 (adp:header "More-cffi")
 
