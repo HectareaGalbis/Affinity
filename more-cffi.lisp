@@ -78,7 +78,7 @@ to be used by DESTROY. For example, if 2 is specified, then DESTROY will receive
                   (apply #',',destroy ,,(if destructor-arguments
 					    ``(loop for index in ',',destructor-arguments
 						    collect (nth index ,,ret-list-sym))
-					    ``(subseq ,,ret-list-sym 0 ,',destructor-arity)))))))))))
+					    ``(subseq ,,ret-list-sym 0 ',',destructor-arity)))))))))))
 
 
 ;; -----------------------------------
