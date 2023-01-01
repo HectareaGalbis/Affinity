@@ -36,101 +36,71 @@
   (str :pointer) (c :int) (n :size))
 
 
-;; -------------------
-;; ----- defwith -----  
-;; -------------------
-
-(adp:defmacro defwith (name create destroy &optional (arity 1) docstring)
-  "Define a macro named NAME. This new macro has the following syntax:
-
-  (NAME var-or-vars (&rest args) &body body)
-
-When using this new macro CREATE is called with ARGS and the results are stored in VAR-OR-VARS. If VAR-OR-VARS
-is a symbol, the rest of returned values are ignored. Afterwards, the BODY forms are evaluated. Finally, 
-DESTROY is called. The arguments used by DESTROY depends on ARITY. If ARITY is a list of non-negative integers
-then they denote the arguments returned by CREATE to be used by DESTROY in the order they appear. For example, 
-using the list (3 0 2) indicates that DESTROY will receive the fourth, first and third values returned by CREATE 
-and in that order. If ARITY is just a non-negative integer then it indicates the number of arguments
-to be used by DESTROY. For example, if 2 is specified, then DESTROY will receive the first 2 values returned by CREATE."  
-  (check-type name symbol)
-  (check-type create symbol)
-  (check-type destroy symbol)
-  (let ((destructor-arity (when (numberp arity) arity))
-	(destructor-arguments (when (listp arity) arity)))
-    (when destructor-arity
-      (check-type destructor-arity unsigned-byte "a non-negative integer"))
-    (when destructor-arguments
-      (check-type destructor-arguments list)
-      (loop for dest-arg in destructor-arguments
-	    do (check-type dest-arg unsigned-byte "a non-negative integer")))
-    (with-gensyms (var args body ret-list-sym var-list)
-      `(adp:defmacro ,name (,var ,args &body ,body)
-	 ,@(when docstring
-	     `(,docstring))
-	 (with-gensyms ((,ret-list-sym "ret-list"))
-           (let ((,var-list (if (listp ,var)
-				,var
-				(list ,var))))
-             `(let ((,,ret-list-sym (multiple-value-list (,',create ,@,args))))
-		(unwind-protect
-                     (destructuring-bind ,,var-list ,,ret-list-sym
-		       ,@,body)
-                  (apply #',',destroy ,,(if destructor-arguments
-					    ``(loop for index in ',',destructor-arguments
-						    collect (nth index ,,ret-list-sym))
-					    ``(subseq ,,ret-list-sym 0 ',',destructor-arity)))))))))))
-
-
 ;; -----------------------------------
 ;; ----- define-callback-definer -----
 ;; -----------------------------------
 
+;; :receiver and :returner
+
 (defun check-callback-definer-arg-descriptor (arg-descriptor)
-  (assert (and (listp arg-descriptor)
+  (unless (and (listp arg-descriptor)
 	       (not (null arg-descriptor)))
-	  () "Expected a non-null list.~%Found:~%   ~S" arg-descriptor)
-  (check-type (car arg-descriptor) symbol)
+    (error "MCFFI error: Expected a non-null list as an argument descriptor but ~s was found."
+	   arg-descriptor))
+  (unless (typep (car arg-descriptor) symbol)
+    (error "MCFFI error: Expected a symbol as a callback argument but ~s was found."
+	   (car arg-descriptor)))
   (let ((slot-name (car arg-descriptor))
-	(createp (member :create arg-descriptor))
-	(returnp (member :return arg-descriptor))
+	(createp (member :receiver arg-descriptor))
+	(returnp (member :returner arg-descriptor))
 	(typep (member :type arg-descriptor))
 	(virtualp (cadr (member :virtual arg-descriptor))))
-    (assert (not (and virtualp returnp)) () "If :virtual is used, :return is forbidden. Found them in ~s descriptor"
-	    slot-name)
-    (assert (not (and createp returnp)) () "Just one of :create or :return can appear in an argument descriptor.~%Found in ~s descriptor:~%   ~S~%   ~S"
-	    slot-name (subseq createp 0 2) (subseq returnp 0 2))
-    (assert (not (and virtualp typep)) () "If :virtual is used, :type is forbidden. Found them in ~s descriptor."
-	    slot-name)
+    (unless (not (and virtualp returnp))
+      (error "MCFFI error: The options :virtual and :returner cannot be used simultaneously but they were found in the following descriptor:~%  ~s"
+	     arg-descriptor))
+    (unless (not (and createp returnp))
+      (error "MCFFI error: The options :receiver and :returner cannot be used simultaneously but they were found in the following descriptor:~%  ~s"
+	     arg-descriptor))
+    (unless (not (and virtualp typep))
+      (error "MCFFI error: The options :virtual and :type cannot be used simultaneously but they were found in the following descriptor:~%  ~s"
+	     arg-descriptor))
     (when (not virtualp)
-      (assert typep () "Expected :type and a cffi type in ~s descriptor." slot-name))
+      (unless typep
+	(error "MCFFI error: Expected the option :virtual or :type in the following descriptor:~%  ~s"
+	       arg-descriptor)))
     (loop for rest-descriptor on (cdr arg-descriptor) by #'cddr
 	  for option-type = (car rest-descriptor)
 	  for option-value = (cadr rest-descriptor)
-	  do (assert (member option-type '(:type :virtual :create :return)) ()
-		     "Expected :type, :create or :return in ~s descriptor.~%Found:~%   ~S"
-		     slot-name option-type)
+	  do (unless (member option-type '(:type :virtual :receiver :returner))
+	       (error "MCFFI error: Expected :type, :virtual, :receiver or :returner but ~s was found in the following descriptor:~%  ~s"
+		      option-type arg-descriptor))
 	     (case option-type
 	       (:type
-		(assert (or (symbolp option-value)
+		(unless (or (symbolp option-value)
 			    (and (listp option-value)
 				 (or (eq (car option-value) :struct)
 				     (eq (car option-value) :union))))
-			() "Expected a cffi type after :type in ~s descriptor.~%Found:~%   ~s" slot-name option-value))
-	       (:create
-		(assert (or (not virtualp) (not (null option-value))) ()
-			"Virtual slots must have a non-nil create expression. Found in ~a argument." slot-name)
-		(assert (or (null option-value) virtualp (exists-rec (list slot-name) option-value)) ()
-			"Create expression must use the ~s argument." slot-name))
-	       (:return
-		 (assert (exists-rec (list slot-name) option-value) ()
-			 "Return expression must use the ~s argument." option-value))))))
+		  (error "MCFFI error: Expected a CFFI type but ~s was found in the following descriptor:~%  ~s"
+			 option-value arg-descriptor)))
+	       (:receiver
+		(unless (or (not virtualp) (not (null option-value)))
+		  (error "MCFFI error: Expected non-NIL :receiver expression because :virtual is being used in the following descriptor:~%  ~s"
+			 arg-descriptor))
+		(unless (or (null option-value) virtualp (exists-rec (list slot-name) option-value))
+		  (error "MCFFI error: Expected the use of the symbol ~s in the :receiver expression in the following descriptor:~%  ~s"
+			 slot-name arg-descriptor)))
+	       (:returner
+		 (unless (exists-rec (list slot-name) option-value)
+		   (error "MCFFI error: Expected the use of the symbol ~s in the :returner expression in the following descriptor:~%  ~s"
+			  slot-name arg-descriptor)))))))
 
 (defun check-callback-definer-arg-descriptors (arg-descriptors)
   (loop for arg-descriptor in arg-descriptors
 	do (check-callback-definer-arg-descriptor arg-descriptor)
-	count (member :return arg-descriptor) into return-descriptors
-	finally (assert (<= return-descriptors 1) ()
-			"Expected zero or one return argument. Found ~a" return-descriptors)))
+	count (member :returner arg-descriptor) into return-descriptors
+	finally (unless (<= return-descriptors 1)
+		  (error "MCFFI error: Expected zero or one descriptor using the :returner option but the following descriptors are found:~%~{  ~s~%~}"
+			 return-descriptors))))
 
 (defun extract-create-arguments (arg-descriptors)
   "Return a list of lists with 5 elements: The slot name, the create expression, the type,
@@ -138,8 +108,8 @@ whether is a foreign argument and whether is a lisp argument."
   (loop for arg-descriptor in arg-descriptors
 	for slot-name = (car arg-descriptor)
 	for type = (cadr (member :type arg-descriptor))
-	for createp = (member :create arg-descriptor)
-	for returnp = (member :return arg-descriptor)
+	for createp = (member :receiver arg-descriptor)
+	for returnp = (member :returner arg-descriptor)
 	for virtualp = (member :virtual arg-descriptor)
 	when (or createp (not returnp))
 	  collect (list slot-name
@@ -152,7 +122,7 @@ whether is a foreign argument and whether is a lisp argument."
   "Return a list with three elements: The slot name, the return expression and the type."
   (loop for arg-descriptor in arg-descriptors
 	for slot-name = (car arg-descriptor)
-	for returnp = (member :return arg-descriptor)
+	for returnp = (member :returner arg-descriptor)
 	for type = (cadr (member :type arg-descriptor))
 	when returnp
 	  return (list slot-name
@@ -191,26 +161,28 @@ whether is a foreign argument and whether is a lisp argument."
 					    ,@,callback-body))))))))))
 
 (adp:defmacro define-callback-definer (name &body arg-descriptors)
-  "Define a macro named NAME to define callbacks. Each ARG-DESCRIPTOR must have the following syntax:
+  "Define a macro named NAME to define callbacks. Each arg-descriptor in ARG-DESCRIPTORS must have the following syntax:
 
-  ARG-DESCRIPTOR ::= (SLOT-NAME [[slot-option]])
-  SLOT-OPTION    ::= {:create expr | :return expr}1 | {:type type}1 | :virtual expr
+  arg-descriptor ::= (slot-name [[slot-option]])
+  slot-name      ::= symbol
+  slot-oprion    ::= {:RECEIVER expr | :RETURNER expr}1 | {:TYPE type}1 | :VIRTUAL expr
 
 To understand how this macro works we need to talk about C-arguments and Lisp-arguments. If you define a callback using CFFI:DEFCALLBACK
 the resulting function will receive C-args. That arguments should be translated to the Lisp world resulting on Lisp-arguments. Regarding
 the result value it will be first on the Lisp world and it should be translated to C. With this macro we can establish what are these
 arguments. 
 
-If you add an ARG-DESCRIPTOR you are indicating that your callback will have a C-arg named SLOT-NAME. Using :TYPE gives to that arg the
-specified type. Right now a Lisp-argument is created but no translation will be done. To do a custom translation you must use the :CREATE
-option. The associated expression must use SLOT-NAME and return the new value. But, if expression is NIL no Lisp-argument will be created.
-In this case you should use this value in the :CREATE expression of another ARG-DESCRIPTOR. In other words, the resulting callbacks will have
+If you add an arg-descriptor you are indicating that your callback will have a C-arg named slot-name. Using :TYPE gives to that arg the
+specified foreign type (CFFI type). Right now a Lisp-argument is created but no translation will be done. To do a custom translation you must use the :RECEIVER
+option. The associated expression must use slot-name and return the new Lisp-arg. But, if the expression is NIL no Lisp-argument will be created.
+In this case you should use this C-arg in the :RECEIVER expression of another arg-descriptor. In other words, the resulting callbacks will have
 one less argument. 
 
-You can use :RETURN instead of :CREATE to indicate SLOT-NAME is not a callback argument but a return value. 
+You can use :RETURNER instead of :RECEIVER to indicate slot-name is not a callback argument but a return value. The expression must use
+the symbol slot-name to return the new C returned value. 
 
-The last available option is :VIRTUAL. Using this option indicates that SLOT-NAME is not a C-arg but will be a Lisp arg. You should use
-:CREATE and an expression using the rest of SLOT-NAMEs."
+The last available option is :VIRTUAL. Using this option indicates that slot-name is not a C-arg but will be a Lisp-arg. You should use
+:RECEIVER and an expression using the rest of slot-names to initialize this Lisp-arg."
   (check-type name symbol)
   (let ((docstring (if (stringp (car arg-descriptors))
 		       (car arg-descriptors)
