@@ -10,155 +10,159 @@
 ;; ----- Helper functions -----
 ;; ----------------------------
 
-(defun find-slot-names (slot-names expr)
-  "Return the list of symbols from slot-names that appear in expr"
-  (labels ((find-slot-names-aux (names l names-found)
-	     (cond
-               ((and (symbolp l) (member l names)) (adjoin l names-found))
-               ((consp l) (find-slot-names-aux names (cdr l) (find-slot-names-aux names (car l) names-found)))
-               (t names-found))))
-    (find-slot-names-aux slot-names expr nil)))
+(eval-when (:compile-toplevel :load-toplevel :execute)
 
-(defun exists-rec (syms l)
-  "Return a non-nil value if there is some symbol from syms in l"
-  (if (consp l)
-      (or (exists-rec syms (car l)) (exists-rec syms (cdr l)))
-      (member l syms)))
+  (defun find-slot-names (slot-names expr)
+    "Return the list of symbols from slot-names that appear in expr"
+    (labels ((find-slot-names-aux (names l names-found)
+	       (cond
+		 ((and (symbolp l) (member l names)) (adjoin l names-found))
+		 ((consp l) (find-slot-names-aux names (cdr l) (find-slot-names-aux names (car l) names-found)))
+		 (t names-found))))
+      (find-slot-names-aux slot-names expr nil)))
 
-(defun rec-substitute (assoc-symbols l)
-  "Substitute every ocurrence of each symbol in assoc-symbol by its associated symbol. assoc-symbols is a property list."
-  (cond
-    ((and (symbolp l) (member l assoc-symbols)) (getf assoc-symbols l))
-    ((consp l) (cons (rec-substitute assoc-symbols (car l)) (rec-substitute assoc-symbols (cdr l))))
-    (t l)))
+  (defun exists-rec (syms l)
+    "Return a non-nil value if there is some symbol from syms in l"
+    (if (consp l)
+	(or (exists-rec syms (car l)) (exists-rec syms (cdr l)))
+	(member l syms)))
 
-(cffi:defcfun "memset" :pointer
-  (str :pointer) (c :int) (n :size))
+  (defun rec-substitute (assoc-symbols l)
+    "Substitute every ocurrence of each symbol in assoc-symbol by its associated symbol. assoc-symbols is a property list."
+    (cond
+      ((and (symbolp l) (member l assoc-symbols)) (getf assoc-symbols l))
+      ((consp l) (cons (rec-substitute assoc-symbols (car l)) (rec-substitute assoc-symbols (cdr l))))
+      (t l)))
+
+  (cffi:defcfun "memset" :pointer
+    (str :pointer) (c :int) (n :size)))
 
 
 ;; -----------------------------------
 ;; ----- define-callback-definer -----
 ;; -----------------------------------
 
-;; :receiver and :returner
+(eval-when (:compile-toplevel :load-toplevel :execute)
 
-(defun check-callback-definer-arg-descriptor (arg-descriptor)
-  (unless (and (listp arg-descriptor)
-	       (not (null arg-descriptor)))
-    (error "MCFFI error: Expected a non-null list as an argument descriptor but ~s was found."
-	   arg-descriptor))
-  (unless (typep (car arg-descriptor) symbol)
-    (error "MCFFI error: Expected a symbol as a callback argument but ~s was found."
-	   (car arg-descriptor)))
-  (let ((slot-name (car arg-descriptor))
-	(createp (member :receiver arg-descriptor))
-	(returnp (member :returner arg-descriptor))
-	(typep (member :type arg-descriptor))
-	(virtualp (cadr (member :virtual arg-descriptor))))
-    (unless (not (and virtualp returnp))
-      (error "MCFFI error: The options :virtual and :returner cannot be used simultaneously but they were found in the following descriptor:~%  ~s"
+  (defun check-callback-definer-arg-descriptor (arg-descriptor)
+    (unless (and (listp arg-descriptor)
+		 (not (null arg-descriptor)))
+      (error "MCFFI error: Expected a non-null list as an argument descriptor but ~s was found."
 	     arg-descriptor))
-    (unless (not (and createp returnp))
-      (error "MCFFI error: The options :receiver and :returner cannot be used simultaneously but they were found in the following descriptor:~%  ~s"
-	     arg-descriptor))
-    (unless (not (and virtualp typep))
-      (error "MCFFI error: The options :virtual and :type cannot be used simultaneously but they were found in the following descriptor:~%  ~s"
-	     arg-descriptor))
-    (when (not virtualp)
-      (unless typep
-	(error "MCFFI error: Expected the option :virtual or :type in the following descriptor:~%  ~s"
-	       arg-descriptor)))
-    (loop for rest-descriptor on (cdr arg-descriptor) by #'cddr
-	  for option-type = (car rest-descriptor)
-	  for option-value = (cadr rest-descriptor)
-	  do (unless (member option-type '(:type :virtual :receiver :returner))
-	       (error "MCFFI error: Expected :type, :virtual, :receiver or :returner but ~s was found in the following descriptor:~%  ~s"
-		      option-type arg-descriptor))
-	     (case option-type
-	       (:type
-		(unless (or (symbolp option-value)
-			    (and (listp option-value)
-				 (or (eq (car option-value) :struct)
-				     (eq (car option-value) :union))))
-		  (error "MCFFI error: Expected a CFFI type but ~s was found in the following descriptor:~%  ~s"
-			 option-value arg-descriptor)))
-	       (:receiver
-		(unless (or (not virtualp) (not (null option-value)))
-		  (error "MCFFI error: Expected non-NIL :receiver expression because :virtual is being used in the following descriptor:~%  ~s"
-			 arg-descriptor))
-		(unless (or (null option-value) virtualp (exists-rec (list slot-name) option-value))
-		  (error "MCFFI error: Expected the use of the symbol ~s in the :receiver expression in the following descriptor:~%  ~s"
-			 slot-name arg-descriptor)))
-	       (:returner
-		 (unless (exists-rec (list slot-name) option-value)
-		   (error "MCFFI error: Expected the use of the symbol ~s in the :returner expression in the following descriptor:~%  ~s"
-			  slot-name arg-descriptor)))))))
+    (unless (typep (car arg-descriptor) 'symbol)
+      (error "MCFFI error: Expected a symbol as a callback argument but ~s was found."
+	     (car arg-descriptor)))
+    (let ((slot-name (car arg-descriptor))
+	  (createp (member :receiver arg-descriptor))
+	  (returnp (member :returner arg-descriptor))
+	  (typep (member :type arg-descriptor))
+	  (virtualp (cadr (member :virtual arg-descriptor))))
+      (unless (not (and virtualp returnp))
+	(error "MCFFI error: The options :virtual and :returner cannot be used simultaneously but they were found in the following descriptor:~%  ~s"
+	       arg-descriptor))
+      (unless (not (and createp returnp))
+	(error "MCFFI error: The options :receiver and :returner cannot be used simultaneously but they were found in the following descriptor:~%  ~s"
+	       arg-descriptor))
+      (unless (not (and virtualp typep))
+	(error "MCFFI error: The options :virtual and :type cannot be used simultaneously but they were found in the following descriptor:~%  ~s"
+	       arg-descriptor))
+      (when (not virtualp)
+	(unless typep
+	  (error "MCFFI error: Expected the option :virtual or :type in the following descriptor:~%  ~s"
+		 arg-descriptor)))
+      (loop for rest-descriptor on (cdr arg-descriptor) by #'cddr
+	    for option-type = (car rest-descriptor)
+	    for option-value = (cadr rest-descriptor)
+	    do (unless (member option-type '(:type :virtual :receiver :returner))
+		 (error "MCFFI error: Expected :type, :virtual, :receiver or :returner but ~s was found in the following descriptor:~%  ~s"
+			option-type arg-descriptor))
+	       (case option-type
+		 (:type
+		  (unless (or (symbolp option-value)
+			      (and (listp option-value)
+				   (or (eq (car option-value) :struct)
+				       (eq (car option-value) :union))))
+		    (error "MCFFI error: Expected a CFFI type but ~s was found in the following descriptor:~%  ~s"
+			   option-value arg-descriptor)))
+		 (:receiver
+		  (unless (or (not virtualp) (not (null option-value)))
+		    (error "MCFFI error: Expected non-NIL :receiver expression because :virtual is being used in the following descriptor:~%  ~s"
+			   arg-descriptor))
+		  (unless (or (null option-value) virtualp (exists-rec (list slot-name) option-value))
+		    (error "MCFFI error: Expected the use of the symbol ~s in the :receiver expression in the following descriptor:~%  ~s"
+			   slot-name arg-descriptor)))
+		 (:returner
+		  (unless (exists-rec (list slot-name) option-value)
+		    (error "MCFFI error: Expected the use of the symbol ~s in the :returner expression in the following descriptor:~%  ~s"
+			   slot-name arg-descriptor)))))))
 
-(defun check-callback-definer-arg-descriptors (arg-descriptors)
-  (loop for arg-descriptor in arg-descriptors
-	do (check-callback-definer-arg-descriptor arg-descriptor)
-	count (member :returner arg-descriptor) into return-descriptors
-	finally (unless (<= return-descriptors 1)
-		  (error "MCFFI error: Expected zero or one descriptor using the :returner option but the following descriptors are found:~%~{  ~s~%~}"
-			 return-descriptors))))
+  (defun check-callback-definer-arg-descriptors (arg-descriptors)
+    (loop for arg-descriptor in arg-descriptors
+	  do (check-callback-definer-arg-descriptor arg-descriptor)
+	  count (member :returner arg-descriptor) into return-descriptors
+	  finally (unless (<= return-descriptors 1)
+		    (error "MCFFI error: Expected zero or one descriptor using the :returner option but the following descriptors are found:~%~{  ~s~%~}"
+			   return-descriptors))))
 
-(defun extract-create-arguments (arg-descriptors)
-  "Return a list of lists with 5 elements: The slot name, the create expression, the type,
+  (defun extract-create-arguments (arg-descriptors)
+    "Return a list of lists with 5 elements: The slot name, the create expression, the type,
 whether is a foreign argument and whether is a lisp argument."
-  (loop for arg-descriptor in arg-descriptors
-	for slot-name = (car arg-descriptor)
-	for type = (cadr (member :type arg-descriptor))
-	for createp = (member :receiver arg-descriptor)
-	for returnp = (member :returner arg-descriptor)
-	for virtualp = (member :virtual arg-descriptor)
-	when (or createp (not returnp))
-	  collect (list slot-name
-			(if createp (cadr createp) slot-name)
-			type
-			(not virtualp)
-			(or virtualp (not createp) (cadr createp)))))
+    (loop for arg-descriptor in arg-descriptors
+	  for slot-name = (car arg-descriptor)
+	  for type = (cadr (member :type arg-descriptor))
+	  for createp = (member :receiver arg-descriptor)
+	  for returnp = (member :returner arg-descriptor)
+	  for virtualp = (member :virtual arg-descriptor)
+	  when (or createp (not returnp))
+	    collect (list slot-name
+			  (if createp (cadr createp) slot-name)
+			  type
+			  (not virtualp)
+			  (or virtualp (not createp) (cadr createp)))))
 
-(defun extract-return-argument (arg-descriptors)
-  "Return a list with three elements: The slot name, the return expression and the type."
-  (loop for arg-descriptor in arg-descriptors
-	for slot-name = (car arg-descriptor)
-	for returnp = (member :returner arg-descriptor)
-	for type = (cadr (member :type arg-descriptor))
-	when returnp
-	  return (list slot-name
-		       (cadr returnp)
-		       type)))
+  (defun extract-return-argument (arg-descriptors)
+    "Return a list with three elements: The slot name, the return expression and the type."
+    (loop for arg-descriptor in arg-descriptors
+	  for slot-name = (car arg-descriptor)
+	  for returnp = (member :returner arg-descriptor)
+	  for type = (cadr (member :type arg-descriptor))
+	  when returnp
+	    return (list slot-name
+			 (cadr returnp)
+			 type)))
 
-(defun create-definer-code (name docstring create-arguments return-argument)
-  (loop for (slot-name create-expr type foreign-arg lisp-arg) in create-arguments
-	when lisp-arg
-	  collect slot-name into lisp-args
-	when create-expr
-	  collect create-expr into lisp-create-exprs
-	when foreign-arg
-	  collect slot-name into foreign-args
-	  and collect type into foreign-types
-	finally (with-gensyms (callback-name callback-body user-lisp-args callback-let-create-exprs)
-		  (let* ((callback-args (mapcar (lambda (x) (gensym (symbol-name x))) foreign-args))
-			 (lisp-args-callback-args (mapcan #'list lisp-args callback-args))
-			 (callback-create-exprs (mapcar (lambda (x) (rec-substitute lisp-args-callback-args x)) lisp-create-exprs))
-			 (callback-args-types (mapcar #'list callback-args foreign-types)))
-		    (return `(adp:defmacro ,name (,callback-name ,lisp-args &body ,callback-body)
-			       ,@(when docstring
-				   `(,docstring))
-			       (let* ((,user-lisp-args ,(cons 'list lisp-args))
-				      (,callback-let-create-exprs (mapcar #'list ,user-lisp-args ',callback-create-exprs)))
-				 ,(if return-argument
-				      (multiple-value-bind (slot-name return-expr ret-type) return-argument
-					(with-gensyms (callback-return-sym)
-					  (let ((callback-return-expr (rec-substitute (list slot-name callback-return-sym) return-expr)))
-					    ``(cffi:defcallback ,,callback-name ,',ret-type ,',callback-args-types
-						(let ((,',callback-return-sym (let ,,callback-let-create-exprs
-										,@,callback-body)))
-						  ,',callback-return-expr)))))
-				      ``(cffi:defcallback ,,callback-name :void ,',callback-args-types
-					  (let ,,callback-let-create-exprs
-					    ,@,callback-body))))))))))
+  (defun create-definer-code (name docstring create-arguments return-argument)
+    (loop for (slot-name create-expr type foreign-arg lisp-arg) in create-arguments
+	  when lisp-arg
+	    collect slot-name into lisp-args
+	  when create-expr
+	    collect create-expr into lisp-create-exprs
+	  when foreign-arg
+	    collect slot-name into foreign-args
+	    and collect type into foreign-types
+	  finally (let ((callback-name (make-symbol "NAME"))
+			(callback-body (make-symbol "BODY")))
+		    (with-gensyms (user-lisp-args callback-let-create-exprs)
+		      (let* ((callback-args (mapcar (lambda (x) (gensym (symbol-name x))) foreign-args))
+			     (lisp-args-callback-args (mapcan #'list lisp-args callback-args))
+			     (callback-create-exprs (mapcar (lambda (x) (rec-substitute lisp-args-callback-args x)) lisp-create-exprs))
+			     (callback-args-types (mapcar #'list callback-args foreign-types)))
+			(return `(adp:defmacro ,name (,callback-name ,lisp-args &body ,callback-body)
+				   ,@(when docstring
+				       `(,docstring))
+				   (let* ((,user-lisp-args ,(cons 'list lisp-args))
+					  (,callback-let-create-exprs (mapcar #'list ,user-lisp-args ',callback-create-exprs)))
+				     ,(if return-argument
+					  (multiple-value-bind (slot-name return-expr ret-type) return-argument
+					    (with-gensyms (callback-return-sym)
+					      (let ((callback-return-expr (rec-substitute (list slot-name callback-return-sym) return-expr)))
+						``(cffi:defcallback ,,callback-name ,',ret-type ,',callback-args-types
+						    (let ((,',callback-return-sym (let ,,callback-let-create-exprs
+										    ,@,callback-body)))
+						      ,',callback-return-expr)))))
+					  ``(cffi:defcallback ,,callback-name :void ,',callback-args-types
+					      (let ,,callback-let-create-exprs
+						,@,callback-body))))))))))))
 
 (adp:defmacro define-callback-definer (name &body arg-descriptors)
   "Define a macro named NAME to define callbacks. Each arg-descriptor in ARG-DESCRIPTORS must have the following syntax:
@@ -201,300 +205,316 @@ The last available option is :VIRTUAL. Using this option indicates that slot-nam
 ;; ----- define-foreign-struct -----
 ;; ---------------------------------
 
-(defun check-foreign-struct-struct-type (struct-type)
-  (check-type struct-type list)
-  (assert (member (car struct-type) '(:struct :union)) ()
-	  "The struct type must be a list starting with :struct or :union. Found: ~s" struct-type))
+(eval-when (:compile-toplevel :load-toplevel :execute)
 
-(defun check-foreign-struct-infix (infix)
-  (check-type infix (or symbol list))
-  (when (listp infix)
-    (loop for subinfix in infix
-	  do (check-type subinfix symbol))))
+  (defun check-foreign-struct-struct-type (struct-type)
+    (unless (and (typep struct-type 'list)
+		 (member (car struct-type) '(:struct :union)))
+      (error "MCFFI error: Expected a list starting with :struct or :union but ~s was found."
+	     struct-type)))
 
-(defun check-foreign-struct-options (options)
-  (check-type options list)
-  (loop for option in options
-	do (assert (member option '(:no-constructor :no-destructor :default-readers :default-writers :default-constructors :include-invisibles)) ()
-				    "Expected :no-constructor, :no-destructor, :default-readers, :default-writers, :default-constructors or :include-invisibles.~%Found:~%   ~S"
-				    option)))
+  (defun check-foreign-struct-infix (infix)
+    (unless (symbolp infix)
+      (error "MCFFI error: Expected a symbol as an infix but ~s was found."
+	     infix)))
 
-(defun check-foreign-struct-slot-name (slot-name virtualp slot-names struct-type)
-  (check-type slot-name symbol)
-  (assert (or virtualp (member slot-name slot-names)) ()
-	  "Expected a slot name from ~s~%Found:~%   ~s" struct-type slot-name))
+  (defun check-foreign-struct-options (options)
+    (unless (listp options)
+      (error "MCFFI error: Expected a list of option but ~s was found."
+	     options))
+    (loop for option in options
+	  do (unless (member option '(:no-constructor :no-destructor :default-readers :default-writers :default-constructors :include-invisibles))
+	       (error "MCFFI error: Expected :no-constructor, :no-destructor, :default-readers, :default-writers, :default-constructors or :include-invisibles but ~s was found."
+		      option))))
 
-(defun check-foreign-struct-initform-option (constructorp constructor-value slot-name)
-  (when constructorp
-    (assert (car constructor-value) ()
-	    "If the constructor does not specify a parameter in ~s descriptor, :initform is forbidden." slot-name)))
+  (defun check-foreign-struct-slot-name (slot-name virtualp slot-names struct-type)
+    (unless (symbolp slot-name)
+      (error "MCFFI error: Expected a symbol as a slot descriptor name but ~s was found."
+	     slot-name))
+    (unless (or virtualp (member slot-name slot-names))
+      (error "MCFFI error: Expected a member of ~s but ~s was found."
+	     struct-type slot-name)))
 
-(defun check-foreign-struct-constructor-option (constructor-value virtual-value slot-name)
-  (assert (or (null constructor-value)
-	      (and (listp constructor-value)
-		   (listp (car constructor-value))
-		   (<= (length (car constructor-value)) 1)
-		   (symbolp (caar constructor-value))
-		   (not (null (cadr constructor-value)))))
-	  () "Expected a constructor-value expression (([arg]) &body body) in ~s descriptor.~%Found:~%   ~S"
-	  slot-name constructor-value)
-  (assert (or (null (car constructor-value))
-	      (not (eq slot-name (caar constructor-value))))
-	  () "The argument ~s must be different of ~s."
-	  (car constructor-value) slot-name)
-  (assert (or (null (car constructor-value))
-	      (exists-rec (list (caar constructor-value)) (cdr constructor-value)))
-	  () "Expected the use of ~s in the constructor-value expression of ~s descriptor."
-	  (caar constructor-value) slot-name)
-  (assert (or virtual-value (null constructor-value) (exists-rec (list slot-name) (cdr constructor-value)))
-	  () "Expected the use of ~s in its constructor-value expression." slot-name))
+  (defun check-foreign-struct-initform-option (constructorp constructor-value slot-name)
+    (when constructorp
+      (unless (car constructor-value)
+	(error "MCFFI error: The option :initform is used when no parameter is specified in the :constructor expression. Found in the ~s despcriptor."
+	       slot-name))))
 
-(defun check-foreign-struct-destructor-option (destructor-value slot-name)
-  (assert (exists-rec (list slot-name) destructor-value) ()
-	  "Expected the use of ~s in its destructor expression." slot-name))
+  (defun check-foreign-struct-constructor-option (constructor-value virtual-value slot-name)
+    (unless (or (null constructor-value)
+		(and (listp constructor-value)
+		     (listp (car constructor-value))
+		     (<= (length (car constructor-value)) 1)
+		     (symbolp (caar constructor-value))
+		     (not (null (cadr constructor-value)))))
+      (error "MCFFI error: Expected an expression with the syntax (([arg]) &body body) in the ~s descriptor but ~s was found."
+	     slot-name constructor-value))
+    (unless (or (null (car constructor-value))
+		(not (eq slot-name (caar constructor-value))))
+      (error "MCFFI error: The argument symbol ~s used in the :constructor expression must be different of the slot member name."
+	     (car constructor-value)))
+    (unless (or (null (car constructor-value))
+		(exists-rec (list (caar constructor-value)) (cdr constructor-value)))
+      (error "MCFFI error: Expected the use of the symbol ~s in the :constructor expression."
+	     slot-name))
+    (unless (or virtual-value (null constructor-value) (exists-rec (list slot-name) (cdr constructor-value)))
+      (error "MCFFI error: Expected the use of the symbol ~s in the :constructor expression."
+	     slot-name)))
 
-(defun check-foreign-struct-reader-option (reader-value virtual-value slot-name)
-  (assert (or (null reader-value)
-	      (and (listp reader-value)
-		   (listp (car reader-value))
-		   (not (null (cadr reader-value)))))
-	  () "Expected a reader-value expression ((&rest args) &body body) in the ~s descriptor.~%Found:~%   ~S"
-	  slot-name reader-value)
-  (assert (or virtual-value (null reader-value) (exists-rec (list slot-name) reader-value)) ()
-	  "Expected the use of ~s in its reader-value expression." slot-name))
+  (defun check-foreign-struct-destructor-option (destructor-value slot-name)
+    (unless (exists-rec (list slot-name) destructor-value)
+      (error "MCFFI error: Expected the use of the symbol ~s in the :destructor expression."
+	     slot-name)))
 
-(defun check-foreign-struct-writer-option (writer-value virtual-value slot-name)
-  (assert (or (null writer-value)
-	      (and (listp writer-value)
-		   (listp (car writer-value))
-		   (not (null (car writer-value)))
-		   (not (null (cadr writer-value)))
-		   (not (member (caar writer-value) '(&optional &key &rest &aux &allow-other-keys)))))
-	  () "Expected a writer-value expression ((new-val &rest args) &body body) in the ~s descriptor.~%Found:~%   ~S"
-	  slot-name writer-value)
-  (assert (or virtual-value (null writer-value) (exists-rec (list slot-name) writer-value)) ()
-	  "Expected the use of ~s in its writer-value expression." slot-name))
+  (defun check-foreign-struct-reader-option (reader-value virtual-value slot-name)
+    (unless (or (null reader-value)
+		(and (listp reader-value)
+		     (listp (car reader-value))
+		     (not (null (cadr reader-value)))))
+      (error "MCFFI error: Expected a :reader expression of the form ((&rest args) &body body) in the ~s descriptor but ~s was found."
+	     slot-name reader-value))
+    (unless (or virtual-value (null reader-value) (exists-rec (list slot-name) reader-value))
+      (error "MCFFI error: Expected the use of the symbol ~s in the :reader expression."
+	     slot-name)))
 
-(defun check-foreign-struct-slot-descriptor (descriptor slot-names struct-type no-constructor-p no-destructor-p)
-  (assert descriptor () "Expected a non-nil expression.")
-  (if (listp descriptor)
-      (let* ((slot-name (car descriptor))
-	     (slot-options (cdr descriptor))
-	     (virtualp (member :virtual descriptor))
-	     (virtual-value (second virtualp)))
-	(check-foreign-struct-slot-name slot-name virtual-value slot-names struct-type)
-	(when slot-options
-	  (let* ((destructorp (member :destructor descriptor))
-		 (pointerp (member :pointer descriptor))
-		 (constructorp (member :constructor descriptor))
-		 (constructor-value (cadr constructorp)))
-	    (assert (not (and virtual-value destructorp)) ()
-		    "The :destroy keyword is forbidden for :virtual slots. Found :destroy in ~s descriptor." slot-name)
-	    (assert (not (and virtual-value pointerp)) ()
-		    "The :pointer keyword is forbidden for :virtual slots. Found :pointer in ~s descriptor." slot-name)
-	    (assert (not (and no-constructor-p constructorp)) ()
-		    "While :no-constructor is enabled, :constructor is forbidden. Found :constructor in ~S descriptor." slot-name)
-	    (assert (not (and no-destructor-p destructorp)) ()
-		    "While :no-destructor is enabled, :destructor is forbidden. Found :destructor in ~S descriptor." slot-name)
-	    (loop for rest-slot-options on slot-options by #'cddr
-		  for option-type = (car rest-slot-options)
-		  for option-value = (cadr rest-slot-options)
-		  do (assert (member option-type '(:name :initform :pointer :virtual :constructor :destructor :reader :writer)) ()
-			     "Expected :name, :initform, :pointer, :virtual, :constructor, :destructor, :reader or :writer in ~S descriptor.~%Found:~%   ~S"
-			     slot-name option-type) 
-		     (case option-type
-		       (:name
-			(check-type option-value symbol))
-		       (:initform
-			(check-foreign-struct-initform-option constructorp constructor-value slot-name))
-		       (:constructor
-			   (check-foreign-struct-constructor-option option-value virtual-value slot-name))
-		       (:destructor
-			(check-foreign-struct-destructor-option option-value slot-name))
-		       (:reader
-			(check-foreign-struct-reader-option option-value virtual-value slot-name))
-		       (:writer
-			(check-foreign-struct-writer-option option-value virtual-value slot-name)))))))
-      (check-foreign-struct-slot-name descriptor nil slot-names struct-type)))
+  (defun check-foreign-struct-writer-option (writer-value virtual-value slot-name)
+    (unless (or (null writer-value)
+		(and (listp writer-value)
+		     (listp (car writer-value))
+		     (not (null (car writer-value)))
+		     (not (null (cadr writer-value)))
+		     (not (member (caar writer-value) '(&optional &key &rest &aux &allow-other-keys)))))
+      (error "MCFFI error: Expected a :writer expression with the form ((new-val &rest args) &body body) in the ~s descriptor but ~s was found."
+	     slot-name writer-value))
+    (unless (or virtual-value (null writer-value) (exists-rec (list slot-name) writer-value))
+      (error "MCFFI error: Expected the use of the symbol ~s in the :writer expression."
+	     slot-name)))
+
+  (defun check-foreign-struct-slot-descriptor (descriptor slot-names struct-type no-constructor-p no-destructor-p)
+    (unless descriptor
+      (error "MCFFI error: Expected a non-NIL expression as a slot descriptor."))
+    (if (listp descriptor)
+	(let* ((slot-name (car descriptor))
+	       (slot-options (cdr descriptor))
+	       (virtualp (member :virtual descriptor))
+	       (virtual-value (second virtualp)))
+	  (check-foreign-struct-slot-name slot-name virtual-value slot-names struct-type)
+	  (when slot-options
+	    (let* ((destructorp (member :destructor descriptor))
+		   (pointerp (member :pointer descriptor))
+		   (constructorp (member :constructor descriptor))
+		   (constructor-value (cadr constructorp)))
+	      (unless (not (and virtual-value destructorp))
+		(error "MCFFI error: The :destroy and :virtual options cannot be used simultaneously but they were found in the ~s descriptor."
+		       slot-name))
+	      (unless (not (and virtual-value pointerp))
+		(error "MCFFI error: The :pointer and :virtual options cannot be used simultaneously but they were found in the ~s descriptor."
+		       slot-name))
+	      (unless (not (and no-constructor-p constructorp))
+		(error "MCFFI error: The option :constructor cannot be used when the global option :no-constructor is activated but it was found in the ~s descriptor."
+		       slot-name))
+	      (unless (not (and no-destructor-p destructorp))
+		(error "MCFFI error: The option :destructor cannot be used when the global option :no-destructor is activated but it was found in the ~s descriptor."
+		       slot-name))
+	      (loop for rest-slot-options on slot-options by #'cddr
+		    for option-type = (car rest-slot-options)
+		    for option-value = (cadr rest-slot-options)
+		    do (unless (member option-type '(:name :initform :pointer :virtual :constructor :destructor :reader :writer))
+			 (error "MCFFI error: Expected :name, :initform, :pointer, :virtual, :constructor, :destructor, :reader or :writer in ~s descriptor but ~s was found."
+				slot-name option-type)) 
+		       (case option-type
+			 (:name
+			  (unless (typep option-value 'symbol)
+			    (error "MCFFI error: Expected a symbol as a :name expression but ~s was found."
+				   option-value)))
+			 (:initform
+			  (check-foreign-struct-initform-option constructorp constructor-value slot-name))
+			 (:constructor
+			     (check-foreign-struct-constructor-option option-value virtual-value slot-name))
+			 (:destructor
+			  (check-foreign-struct-destructor-option option-value slot-name))
+			 (:reader
+			  (check-foreign-struct-reader-option option-value virtual-value slot-name))
+			 (:writer
+			  (check-foreign-struct-writer-option option-value virtual-value slot-name)))))))
+	(check-foreign-struct-slot-name descriptor nil slot-names struct-type)))
 
 
-(defun check-foreign-struct-slot-descriptors (descriptors slot-names struct-type no-constructor-p no-destructor-p)
-  (check-type descriptors list)
-  (loop for descriptor in descriptors
-	do (check-foreign-struct-slot-descriptor descriptor slot-names struct-type no-constructor-p no-destructor-p)))
+  (defun check-foreign-struct-slot-descriptors (descriptors slot-names struct-type no-constructor-p no-destructor-p)
+    (loop for descriptor in descriptors
+	  do (check-foreign-struct-slot-descriptor descriptor slot-names struct-type no-constructor-p no-destructor-p)))
 
-(defun extract-descriptor-info (slot-name descriptor keyword)
-  "Return a list with four elements: The slot name, whether the slot is invisible, the option expr, whether the option is used."
-  (cond
-    ((null descriptor) (list slot-name t nil nil))
-    ((symbolp descriptor) (list slot-name nil nil nil))
-    (t (let ((key-expr (member keyword descriptor)))
-	 (list slot-name nil (cadr key-expr) (and key-expr t))))))
+  (defun extract-descriptor-info (slot-name descriptor keyword)
+    "Return a list with four elements: The slot name, whether the slot is invisible, the option expr, whether the option is used."
+    (cond
+      ((null descriptor) (list slot-name t nil nil))
+      ((symbolp descriptor) (list slot-name nil nil nil))
+      (t (let ((key-expr (member keyword descriptor)))
+	   (list slot-name nil (cadr key-expr) (and key-expr t))))))
 
-(defun create-constructor-code (constructor-infos pointer-slots name-infos initform-infos struct-type
-				enable-default-constructors enable-invisibles suffix)
-  (let ((slot-names (cffi:foreign-slot-names struct-type)))
-    (iter
-      (for (slot-name invisiblep constructor constructorp) in constructor-infos)
-      (when constructor
-	(unioning (find-slot-names slot-names (cdr constructor)) into used-slots))
-      (when (and enable-default-constructors (not constructorp))
-	(collect slot-name into used-slots))
-      (when (and (or enable-invisibles (not invisiblep))
-		 (or constructor (and enable-default-constructors (not constructorp))))
-	(if constructorp
-	    (when (not (null (car constructor)))
-	      (let* ((namep (member slot-name name-infos :key #'car))
-		     (keyword-name (if namep (cadar namep) slot-name))
-		     (arg (caar constructor))
-		     (initformp (member slot-name initform-infos :key #'car))
-		     (initform (if initformp (cadar initformp) 0))
-		     (supplied-var (when (eq (car struct-type) :union) (gensym))))
-		(collect `((,(intern (symbol-name keyword-name) "KEYWORD") ,arg) ,initform ,@(when (eq (car struct-type) :union) `(,supplied-var)))
-		  into constructor-parameters)
-		(if (eq (car struct-type) :union)
-		    (collect `(when ,supplied-var ,@(cdr constructor)) into constructor-expressions)
-		    (appending (cdr constructor) into constructor-expressions))))
-	    (let* ((namep (member slot-name name-infos :key #'car))
-		   (keyword-name (if namep (cadar namep) slot-name))
-		   (arg (gensym))
-		   (initformp (member slot-name initform-infos :key #'car))
-		   (initform (if initformp (cadar initformp) 0))
-		   (supplied-var (when (eq (car struct-type) :union) (gensym))))
-	      (collect `((,(intern (symbol-name keyword-name) "KEYWORD") ,arg) ,initform ,@(when (eq (car struct-type) :union) `(,supplied-var)))
-		into constructor-parameters)
-	      (collect (if (eq (car struct-type) :union)
-			   `(when ,supplied-var (setf ,slot-name ,arg))
-			   `(setf ,slot-name ,arg))
-		into constructor-expressions))))
-      (finally (return (let ((final-used-slots (mapcar (lambda (x) (if (member x pointer-slots)
-								       (list :pointer x)
-								       x))
-						       used-slots)))
-			 (with-gensyms (object-sym)
-			   `(adp:defun ,(intern (concatenate 'string "CREATE-" (string-upcase (symbol-name suffix))))
-				(&key ,@constructor-parameters)
-			      ,(format nil "Constructor of ~s." suffix)
-			      (let ((,object-sym (cffi:foreign-alloc ',struct-type)))
-				(memset ,object-sym 0 (cffi:foreign-type-size ',struct-type))
-				(cffi:with-foreign-slots (,final-used-slots ,object-sym ,struct-type)
-				  ,@constructor-expressions)
-				(values ,object-sym))))))))))
+  (defun create-constructor-code (constructor-infos pointer-slots name-infos initform-infos struct-type
+				  enable-default-constructors enable-invisibles suffix)
+    (let ((slot-names (cffi:foreign-slot-names struct-type)))
+      (iter
+       (for (slot-name invisiblep constructor constructorp) in constructor-infos)
+       (when constructor
+	 (unioning (find-slot-names slot-names (cdr constructor)) into used-slots))
+       (when (and enable-default-constructors (not constructorp))
+	 (collect slot-name into used-slots))
+       (when (and (or enable-invisibles (not invisiblep))
+		  (or constructor (and enable-default-constructors (not constructorp))))
+	 (if constructorp
+	     (when (not (null (car constructor)))
+	       (let* ((namep (member slot-name name-infos :key #'car))
+		      (keyword-name (if namep (cadar namep) slot-name))
+		      (arg (caar constructor))
+		      (initformp (member slot-name initform-infos :key #'car))
+		      (initform (if initformp (cadar initformp) 0))
+		      (supplied-var (when (eq (car struct-type) :union) (gensym))))
+		 (collect `((,(intern (symbol-name keyword-name) "KEYWORD") ,arg) ,initform ,@(when (eq (car struct-type) :union) `(,supplied-var)))
+		   into constructor-parameters)
+		 (if (eq (car struct-type) :union)
+		     (collect `(when ,supplied-var ,@(cdr constructor)) into constructor-expressions)
+		     (appending (cdr constructor) into constructor-expressions))))
+	     (let* ((namep (member slot-name name-infos :key #'car))
+		    (keyword-name (if namep (cadar namep) slot-name))
+		    (arg (make-symbol (symbol-name keyword-name)))
+		    (initformp (member slot-name initform-infos :key #'car))
+		    (initform (if initformp (cadar initformp) 0))
+		    (supplied-var (when (eq (car struct-type) :union) (gensym))))
+	       (collect `((,(intern (symbol-name keyword-name) "KEYWORD") ,arg) ,initform ,@(when (eq (car struct-type) :union) `(,supplied-var)))
+		 into constructor-parameters)
+	       (collect (if (eq (car struct-type) :union)
+			    `(when ,supplied-var (setf ,slot-name ,arg))
+			    `(setf ,slot-name ,arg))
+		 into constructor-expressions))))
+       (finally (return (let ((final-used-slots (mapcar (lambda (x) (if (member x pointer-slots)
+									(list :pointer x)
+									x))
+							used-slots)))
+			  (with-gensyms (object-sym)
+			    `(adp:defun ,(intern (concatenate 'string "CREATE-" (string-upcase (symbol-name suffix))))
+				 (&key ,@constructor-parameters)
+			       ,(format nil "Constructor of ~s." suffix)
+			       (let ((,object-sym (cffi:foreign-alloc ',struct-type)))
+				 (memset ,object-sym 0 (cffi:foreign-type-size ',struct-type))
+				 (cffi:with-foreign-slots (,final-used-slots ,object-sym ,struct-type)
+				   ,@constructor-expressions)
+				 (values ,object-sym))))))))))
 
-(defun create-destructor-code (destructor-infos pointer-slots struct-type suffix)
-  (let ((slot-names (cffi:foreign-slot-names struct-type)))
-    (iter (for (nil nil destructor destructorp) in destructor-infos)
-      (when destructorp
-	(collect destructor into destructor-exprs)
-	(unioning (find-slot-names slot-names destructor) into used-slots))
-      (finally (return (let ((final-used-slots (mapcar (lambda (x) (if (member x pointer-slots)
-								       (list :pointer x)
-								       x))
-						       used-slots)))
-			 (with-gensyms (arg)
-			   `(adp:defun ,(intern (concatenate 'string "DESTROY-" (symbol-name suffix))) (,arg)
-			      ,(format nil "Destructor of ~s." suffix)
-			      ,(when final-used-slots
-				 `(cffi:with-foreign-slots (,final-used-slots ,arg ,struct-type)
-				    ,@destructor-exprs))
-			      (cffi:foreign-free ,arg)))))))))
+  (defun create-destructor-code (destructor-infos pointer-slots struct-type suffix)
+    (let ((slot-names (cffi:foreign-slot-names struct-type)))
+      (iter (for (nil nil destructor destructorp) in destructor-infos)
+	    (when destructorp
+	      (collect destructor into destructor-exprs)
+	      (unioning (find-slot-names slot-names destructor) into used-slots))
+	    (finally (return (let ((final-used-slots (mapcar (lambda (x) (if (member x pointer-slots)
+									     (list :pointer x)
+									     x))
+							     used-slots))
+				   (arg (make-symbol "OBJECT")))
+			       `(adp:defun ,(intern (concatenate 'string "DESTROY-" (symbol-name suffix))) (,arg)
+				  ,(format nil "Destructor of ~s." suffix)
+				  ,(when final-used-slots
+				     `(cffi:with-foreign-slots (,final-used-slots ,arg ,struct-type)
+					,@destructor-exprs))
+				  (cffi:foreign-free ,arg))))))))
 
-(defun create-with-code (suffix)
-  (let ((with-macro-name (intern (concatenate 'string "WITH-" (symbol-name suffix))))
-	(create-name (intern (concatenate 'string "CREATE-" (symbol-name suffix))))
-	(destroy-name (intern (concatenate 'string "DESTROY-" (symbol-name suffix)))))
-    `(defwith ,with-macro-name ,create-name ,destroy-name 1
-	      ,(format nil "Wrap the body forms with ~s and ~s." create-name destroy-name))))
+  (defun create-with-code (suffix)
+    (let ((create-name (intern (concatenate 'string "CREATE-" (symbol-name suffix))))
+	  (destroy-name (intern (concatenate 'string "DESTROY-" (symbol-name suffix)))))
+      `(defwith ,create-name #',create-name #',destroy-name)))
 
-(defun create-readers-code (reader-infos pointer-slots name-infos struct-type
-			    enable-default-readers enable-invisibles prefix)
-  (let ((slot-names (cffi:foreign-slot-names struct-type)))
-    (iter (for (slot-name invisiblep reader readerp) in reader-infos)
-      (when (and (or enable-invisibles (not invisiblep))
-		 (or reader (and enable-default-readers (not readerp))))
-	(let* ((object-arg (gensym))
-	       (args (cons object-arg (if reader (car reader) nil)))
-	       (final-reader (if reader (cons 'progn (cdr reader)) slot-name))
-	       (used-slots (find-slot-names slot-names final-reader))
-	       (final-used-slots (mapcar (lambda (x) (if (member x pointer-slots)
-							 (list :pointer x)
-							 x))
-					 used-slots))
-	       (namep (member slot-name name-infos :key #'car))
-	       (name (if namep (cadar namep) slot-name)))
-	  (collect `(adp:defun ,(intern (concatenate 'string (symbol-name prefix) "-" (symbol-name name)))
-		      ,args
-		      (cffi:with-foreign-slots (,final-used-slots ,(car args) ,struct-type)
-			,final-reader))))))))
+  (defun create-readers-code (reader-infos pointer-slots name-infos struct-type
+			      enable-default-readers enable-invisibles prefix)
+    (let ((slot-names (cffi:foreign-slot-names struct-type)))
+      (iter (for (slot-name invisiblep reader readerp) in reader-infos)
+	    (when (and (or enable-invisibles (not invisiblep))
+		       (or reader (and enable-default-readers (not readerp))))
+	      (let* ((object-arg (make-symbol "OBJECT"))
+		     (args (cons object-arg (if reader (car reader) nil)))
+		     (final-reader (if reader (cons 'progn (cdr reader)) slot-name))
+		     (used-slots (find-slot-names slot-names final-reader))
+		     (final-used-slots (mapcar (lambda (x) (if (member x pointer-slots)
+							       (list :pointer x)
+							       x))
+					       used-slots))
+		     (namep (member slot-name name-infos :key #'car))
+		     (name (if namep (cadar namep) slot-name)))
+		(collect `(adp:defun ,(intern (concatenate 'string (symbol-name prefix) "-" (symbol-name name)))
+			    ,args
+			    (cffi:with-foreign-slots (,final-used-slots ,(car args) ,struct-type)
+			      ,final-reader))))))))
 
-(defun create-writers-code (writer-infos pointer-slots name-infos struct-type
-			    enable-default-writers enable-invisibles prefix)
-  (let ((slot-names (cffi:foreign-slot-names struct-type)))
-    (iter (for (slot-name invisiblep writer writerp) in writer-infos)
-      (when (and (or enable-invisibles (not invisiblep))
-		 (or writer (and enable-default-writers (not writerp))))
-	(let* ((object-arg (gensym))
-	       (new-value-arg (if writer (caar writer) (gensym)))
-	       (args (if writer
-			 `(,new-value-arg ,object-arg ,@(cdar writer))
-			 `(,new-value-arg ,object-arg)))
-	       (final-writer (if writer (cons 'progn (cdr writer)) `(setf ,slot-name ,new-value-arg)))
-	       (used-slots (find-slot-names slot-names final-writer))
-	       (final-used-slots (mapcar (lambda (x) (if (member x pointer-slots)
-							 (list :pointer x)
-							 x))
-					 used-slots))
-	       (namep (member slot-name name-infos :key #'car))
-	       (name (if namep (cadar namep) slot-name)))
-	  (collect `(adp:defun (setf ,(intern (concatenate 'string (symbol-name prefix) "-" (symbol-name name))))
-		      ,args
-		      (cffi:with-foreign-slots (,final-used-slots ,object-arg ,struct-type)
-			,final-writer))))))))
+  (defun create-writers-code (writer-infos pointer-slots name-infos struct-type
+			      enable-default-writers enable-invisibles prefix)
+    (let ((slot-names (cffi:foreign-slot-names struct-type)))
+      (iter (for (slot-name invisiblep writer writerp) in writer-infos)
+	    (when (and (or enable-invisibles (not invisiblep))
+		       (or writer (and enable-default-writers (not writerp))))
+	      (let* ((object-arg (make-symbol "OBJECT"))
+		     (new-value-arg (if writer (caar writer) (gensym)))
+		     (args (if writer
+			       `(,new-value-arg ,object-arg ,@(cdar writer))
+			       `(,new-value-arg ,object-arg)))
+		     (final-writer (if writer (cons 'progn (cdr writer)) `(setf ,slot-name ,new-value-arg)))
+		     (used-slots (find-slot-names slot-names final-writer))
+		     (final-used-slots (mapcar (lambda (x) (if (member x pointer-slots)
+							       (list :pointer x)
+							       x))
+					       used-slots))
+		     (namep (member slot-name name-infos :key #'car))
+		     (name (if namep (cadar namep) slot-name)))
+		(collect `(adp:defun (setf ,(intern (concatenate 'string (symbol-name prefix) "-" (symbol-name name))))
+			    ,args
+			    (cffi:with-foreign-slots (,final-used-slots ,object-arg ,struct-type)
+			      ,final-writer))))))))
 
-(defun define-foreign-struct-aux (struct-type infix options &rest slot-descriptors)
-  (let ((no-constructorp      (member :no-constructor options))
-	(no-destructorp       (member :no-destructor options))
-	(default-constructorp (member :default-constructors options))
-	(default-readerp      (member :default-readers options))
-	(default-writerp      (member :default-writers options))
-	(invisiblesp          (member :include-invisibles options)))
-    (loop for slot-name in (cffi:foreign-slot-names struct-type)
-	  for pre-slot-descriptor = (car (member slot-name slot-descriptors :key (lambda (x) (if (listp x) (car x) x))))
-	  for slot-descriptor =     (if (listp pre-slot-descriptor) pre-slot-descriptor (list pre-slot-descriptor))
-	  for pointerp =       (member :pointer slot-descriptor)
-	  for pointer-value =  (cadr pointerp)
-	  for namep =          (member :name slot-descriptor)
-	  for name-value =     (cadr namep)
-	  for initformp =      (member :initform slot-descriptor)
-	  for initform-value = (cadr initformp)
-	  when pointer-value
-	    collect slot-name                                                         into pointer-slots
-	  when namep
-	    collect (list slot-name name-value)                                       into name-infos
-	  when initformp
-	    collect (list slot-name initform-value)                                   into initform-infos
-	  when (not no-constructorp)
-	    collect (extract-descriptor-info slot-name slot-descriptor :constructor)  into constructor-infos
-	  when (not no-destructorp)
-	    collect (extract-descriptor-info slot-name slot-descriptor :destructor)   into destructor-infos
-	  collect (extract-descriptor-info slot-name slot-descriptor :reader)     into reader-infos
-	  collect (extract-descriptor-info slot-name slot-descriptor :writer)     into writer-infos
-	  finally (return `(progn
-			     ,@(unless no-constructorp
-				 (list (create-constructor-code constructor-infos pointer-slots name-infos
-								initform-infos struct-type
-								default-constructorp
-								invisiblesp
-								infix)))
-			     ,@(unless no-destructorp
-				 (list (create-destructor-code destructor-infos pointer-slots struct-type infix)))
-			     ,@(unless (or no-constructorp
-					   no-destructorp)
-				 (list (create-with-code infix)))
-			     ,@(create-readers-code reader-infos pointer-slots name-infos struct-type
-						    default-readerp invisiblesp infix)
-			     ,@(create-writers-code writer-infos pointer-slots name-infos struct-type
-						     default-writerp invisiblesp infix))))))
+  (defun define-foreign-struct-aux (struct-type infix options &rest slot-descriptors)
+    (let ((no-constructorp      (member :no-constructor options))
+	  (no-destructorp       (member :no-destructor options))
+	  (default-constructorp (member :default-constructors options))
+	  (default-readerp      (member :default-readers options))
+	  (default-writerp      (member :default-writers options))
+	  (invisiblesp          (member :include-invisibles options)))
+      (loop for slot-name in (cffi:foreign-slot-names struct-type)
+	    for pre-slot-descriptor = (car (member slot-name slot-descriptors :key (lambda (x) (if (listp x) (car x) x))))
+	    for slot-descriptor =     (if (listp pre-slot-descriptor) pre-slot-descriptor (list pre-slot-descriptor))
+	    for pointerp =       (member :pointer slot-descriptor)
+	    for pointer-value =  (cadr pointerp)
+	    for namep =          (member :name slot-descriptor)
+	    for name-value =     (cadr namep)
+	    for initformp =      (member :initform slot-descriptor)
+	    for initform-value = (cadr initformp)
+	    when pointer-value
+	      collect slot-name                                                         into pointer-slots
+	    when namep
+	      collect (list slot-name name-value)                                       into name-infos
+	    when initformp
+	      collect (list slot-name initform-value)                                   into initform-infos
+	    when (not no-constructorp)
+	      collect (extract-descriptor-info slot-name slot-descriptor :constructor)  into constructor-infos
+	    when (not no-destructorp)
+	      collect (extract-descriptor-info slot-name slot-descriptor :destructor)   into destructor-infos
+	    collect (extract-descriptor-info slot-name slot-descriptor :reader)     into reader-infos
+	    collect (extract-descriptor-info slot-name slot-descriptor :writer)     into writer-infos
+	    finally (return `(progn
+			       ,@(unless no-constructorp
+				   (list (create-constructor-code constructor-infos pointer-slots name-infos
+								  initform-infos struct-type
+								  default-constructorp
+								  invisiblesp
+								  infix)))
+			       ,@(unless no-destructorp
+				   (list (create-destructor-code destructor-infos pointer-slots struct-type infix)))
+			       ,@(unless (or no-constructorp
+					     no-destructorp)
+				   (list (create-with-code infix)))
+			       ,@(create-readers-code reader-infos pointer-slots name-infos struct-type
+						      default-readerp invisiblesp infix)
+			       ,@(create-writers-code writer-infos pointer-slots name-infos struct-type
+						      default-writerp invisiblesp infix)))))))
 
 (adp:defmacro define-foreign-struct (struct-type infix options &body slot-descriptors)
   "Define a wraper around the foreign struct (or union) STRUCT-TYPE. The symbol INFIX is used to generate the function names.

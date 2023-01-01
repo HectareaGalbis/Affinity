@@ -1,8 +1,8 @@
 
 
 (defpackage :more-cffi
-  (:use :cl :alexandria :iterate)
+  (:use :cl :alexandria :iterate :clith)
   (:nicknames :mcffi)
-  (:export #:defwith
-	   #:define-callback-definer
+  (:shadowing-import-from :clith #:with)
+  (:export #:define-callback-definer
 	   #:define-foreign-struct))
