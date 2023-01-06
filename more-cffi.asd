@@ -9,7 +9,7 @@
 	       (:file "more-cffi")))
 
 
-(asdf:defsystem "more-cffi/doc"
+(asdf:defsystem "more-cffi/docs"
   :author "Hector Galbis Sanchis <hectometrocuadrado@gmail.com>"
   :description "Extension of the CFFI project. A facility to wrap C bindings and write documentation."
   :license "The Unlicense"

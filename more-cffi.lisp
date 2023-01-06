@@ -171,7 +171,7 @@ whether is a foreign argument and whether is a lisp argument."
   docstring      ::= string
   arg-descriptor ::= (slot-name slot-option*)
   slot-name      ::= symbol
-  slot-oprion    ::= { :RECEIVER expr | :RETURNER expr }1 | { :TYPE type }1 | { :VIRTUAL expr }
+  slot-oprion    ::= { :RECEIVER expr } | { :RETURNER expr } | { :TYPE type }1 | { :VIRTUAL expr }
 
 To understand how this macro works we need to talk about C-arguments and Lisp-arguments. If you define a callback using CFFI:DEFCALLBACK
 the resulting function will receive C-args. That arguments should be translated to the Lisp world resulting on Lisp-arguments. Regarding
@@ -181,8 +181,7 @@ arguments.
 If you add an arg-descriptor you are indicating that your callback will have a C-arg named slot-name. Using :TYPE gives to that arg the
 specified foreign type (CFFI type). Right now a Lisp-argument is created but no translation will be done. To do a custom translation you must use the :RECEIVER
 option. The associated expression must use slot-name and return the new Lisp-arg. But, if the expression is NIL no Lisp-argument will be created.
-In this case you should use this C-arg in the :RECEIVER expression of another arg-descriptor. In other words, the resulting callbacks will have
-one less argument. 
+In this case you should use this C-arg in the :RECEIVER expression of another arg-descriptor. This will result in a callback with one less argument. 
 
 You can use :RETURNER instead of :RECEIVER to indicate slot-name is not a callback argument but a return value. The expression must use
 the symbol slot-name to return the new C returned value. 
@@ -230,26 +229,28 @@ The last available option is :VIRTUAL. Using this option indicates that slot-nam
 		      option))))
 
   (defun check-foreign-struct-constructor-documentation (documentation no-constructor-p)
-    (unless (not no-constructor-p)
-      (error "MCFFI error: Trying to add documentation to the constructor when :NO-CONSTRUCTOR is used. Found: ~s"
-	     documentation))
-    (unless (= (length documentation) 2)
-      (error "MCFFI error: The constructor documentation form must be a list with two elements, but ~s was found."
-	     documentation))
-    (unless (stringp (cadr documentation))
-      (error "MCFFI error: The argument agter :CONSTRUCTOR-DOCUMENTATION must be a string but ~s was found."
-	     (cadr documentation))))
+    (when documentation
+      (unless (not no-constructor-p)
+	(error "MCFFI error: Trying to add documentation to the constructor when :NO-CONSTRUCTOR is used. Found: ~s"
+	       documentation))
+      (unless (= (length documentation) 2)
+	(error "MCFFI error: The constructor documentation form must be a list with two elements, but ~s was found."
+	       documentation))
+      (unless (stringp (cadr documentation))
+	(error "MCFFI error: The argument agter :CONSTRUCTOR-DOCUMENTATION must be a string but ~s was found."
+	       (cadr documentation)))))
 
   (defun check-foreign-struct-destructor-documentation (documentation no-destructor-p)
-    (unless (not no-destructor-p)
-      (error "MCFFI error: Trying to add documentation to the destructor when :NO-DESTRUCTOR is used. Found: ~s"
-	     documentation))
-    (unless (= (length documentation) 2)
-      (error "MCFFI error: The destructor documentation form must be a list with two elements, but ~s was found."
-	     documentation))
-    (unless (stringp (cadr documentation))
-      (error "MCFFI error: The argument agter :DESTRUCTOR-DOCUMENTATION must be a string but ~s was found."
-	     (cadr documentation))))
+    (when documentation
+      (unless (not no-destructor-p)
+	(error "MCFFI error: Trying to add documentation to the destructor when :NO-DESTRUCTOR is used. Found: ~s"
+	       documentation))
+      (unless (= (length documentation) 2)
+	(error "MCFFI error: The destructor documentation form must be a list with two elements, but ~s was found."
+	       documentation))
+      (unless (stringp (cadr documentation))
+	(error "MCFFI error: The argument agter :DESTRUCTOR-DOCUMENTATION must be a string but ~s was found."
+	       (cadr documentation)))))
   
   (defun check-foreign-struct-slot-name (slot-name virtualp slot-names struct-type)
     (unless (symbolp slot-name)
@@ -302,6 +303,12 @@ The last available option is :VIRTUAL. Using this option indicates that slot-nam
       (error "MCFFI error: Expected the use of the symbol ~s in the :reader expression."
 	     slot-name)))
 
+  (defun check-foreign-struct-reader-documentation-option (docstring slot-name)
+    (unless (or (null docstring)
+		(stringp docstring))
+      (error "MCFFI error: Expected NIL or a string as a reader docstring  in the ~s descriptor but ~s was found."
+	     slot-name docstring)))
+  
   (defun check-foreign-struct-writer-option (writer-value virtual-value slot-name)
     (unless (or (null writer-value)
 		(and (listp writer-value)
@@ -314,6 +321,12 @@ The last available option is :VIRTUAL. Using this option indicates that slot-nam
     (unless (or virtual-value (null writer-value) (exists-rec (list slot-name) writer-value))
       (error "MCFFI error: Expected the use of the symbol ~s in the :writer expression."
 	     slot-name)))
+
+  (defun check-foreign-struct-writer-documentation-option (docstring slot-name)
+    (unless (or (null docstring)
+		(stringp docstring))
+      (error "MCFFI error: Expected NIL or a string as a writer docstring  in the ~s descriptor but ~s was found."
+	     slot-name docstring)))
 
   (defun check-foreign-struct-slot-descriptor (descriptor slot-names struct-type no-constructor-p no-destructor-p)
     (unless descriptor
@@ -344,8 +357,8 @@ The last available option is :VIRTUAL. Using this option indicates that slot-nam
 	      (loop for rest-slot-options on slot-options by #'cddr
 		    for option-type = (car rest-slot-options)
 		    for option-value = (cadr rest-slot-options)
-		    do (unless (member option-type '(:name :initform :pointer :virtual :constructor :destructor :reader :writer))
-			 (error "MCFFI error: Expected :name, :initform, :pointer, :virtual, :constructor, :destructor, :reader or :writer in ~s descriptor but ~s was found."
+		    do (unless (member option-type '(:name :initform :pointer :virtual :constructor :destructor :reader :reader-documentation :writer :writer-documentation))
+			 (error "MCFFI error: Expected :name, :initform, :pointer, :virtual, :constructor, :destructor, :reader, :reader-documentation, :writer or :writer-documetnation in ~s descriptor but ~s was found."
 				slot-name option-type)) 
 		       (case option-type
 			 (:name
@@ -360,23 +373,27 @@ The last available option is :VIRTUAL. Using this option indicates that slot-nam
 			  (check-foreign-struct-destructor-option option-value slot-name))
 			 (:reader
 			  (check-foreign-struct-reader-option option-value virtual-value slot-name))
+			 (:reader-documentation
+			  (check-foreign-struct-reader-documentation-option option-value slot-name))
 			 (:writer
-			  (check-foreign-struct-writer-option option-value virtual-value slot-name)))))))
+			  (check-foreign-struct-writer-option option-value virtual-value slot-name))
+			 (:writer-documentation
+			  (check-foreign-struct-writer-documentation-option option-value slot-name)))))))
 	(check-foreign-struct-slot-name descriptor nil slot-names struct-type)))
 
   (defun extract-constructor-documentation (descriptors doctype)
     (cond
       ((and (listp (car descriptors))
-	    (eq (caar descriptors) doc-type))
+	    (eq (caar descriptors) doctype))
        (car descriptors))
       ((and (listp (cadr descriptors))
-	    (eq (caadr descriptors) doc-type))
+	    (eq (caadr descriptors) doctype))
        (cadr descriptors))
       (t nil)))
 
   (defun check-foreign-struct-slot-descriptors (descriptors slot-names struct-type no-constructor-p no-destructor-p)
     (let* ((constructor-doc (extract-constructor-documentation descriptors :constructor-documentation))
-	   (destructor-doc  (extract-constrcutor-documentation descriptors :destructor-documentation))
+	   (destructor-doc  (extract-constructor-documentation descriptors :destructor-documentation))
 	   (real-descriptors (cond
 			       ((and constructor-doc destructor-doc)
 				(cddr descriptors))
@@ -432,15 +449,16 @@ The last available option is :VIRTUAL. Using this option indicates that slot-nam
 			    `(when ,supplied-var (setf ,slot-name ,arg))
 			    `(setf ,slot-name ,arg))
 		 into constructor-expressions))))
-       (finally (return (let ((final-used-slots (mapcar (lambda (x) (if (member x pointer-slots)
+	(finally (return (let ((docstring (when constructor-doc (cadr constructor-doc)))
+			       (final-used-slots (mapcar (lambda (x) (if (member x pointer-slots)
 									(list :pointer x)
 									x))
 							used-slots)))
 			  (with-gensyms (object-sym)
 			    `(adp:defun ,(intern (concatenate 'string "CREATE-" (string-upcase (symbol-name suffix))))
 				 (&key ,@constructor-parameters)
-			       ,@(when constructor-doc
-				   `(,constructor-doc))
+			       ,@(when docstring
+				   `(,docstring))
 			       (let ((,object-sym (cffi:foreign-alloc ',struct-type)))
 				 (memset ,object-sym 0 (cffi:foreign-type-size ',struct-type))
 				 (cffi:with-foreign-slots (,final-used-slots ,object-sym ,struct-type)
@@ -453,14 +471,15 @@ The last available option is :VIRTUAL. Using this option indicates that slot-nam
 	    (when destructorp
 	      (collect destructor into destructor-exprs)
 	      (unioning (find-slot-names slot-names destructor) into used-slots))
-	    (finally (return (let ((final-used-slots (mapcar (lambda (x) (if (member x pointer-slots)
+	(finally (return (let ((docstring (when destructor-doc (cadr destructor-doc)))
+			       (final-used-slots (mapcar (lambda (x) (if (member x pointer-slots)
 									     (list :pointer x)
 									     x))
 							     used-slots))
 				   (arg (make-symbol "OBJECT")))
 			       `(adp:defun ,(intern (concatenate 'string "DESTROY-" (symbol-name suffix))) (,arg)
-				  ,@(when destructor-doc
-				   `(,destructor-doc))
+				  ,@(when docstring
+				   `(,docstring))
 				  ,(when final-used-slots
 				     `(cffi:with-foreign-slots (,final-used-slots ,arg ,struct-type)
 					,@destructor-exprs))
@@ -471,7 +490,7 @@ The last available option is :VIRTUAL. Using this option indicates that slot-nam
 	  (destroy-name (intern (concatenate 'string "DESTROY-" (symbol-name suffix)))))
       `(defwith ,create-name #',create-name #',destroy-name)))
 
-  (defun create-readers-code (reader-infos pointer-slots name-infos struct-type
+  (defun create-readers-code (reader-infos reader-documentation-infos pointer-slots name-infos struct-type
 			      enable-default-readers enable-invisibles prefix)
     (let ((slot-names (cffi:foreign-slot-names struct-type)))
       (iter (for (slot-name invisiblep reader readerp) in reader-infos)
@@ -479,55 +498,47 @@ The last available option is :VIRTUAL. Using this option indicates that slot-nam
 		       (or reader (and enable-default-readers (not readerp))))
 	      (let* ((object-arg (make-symbol "OBJECT"))
 		     (args (cons object-arg (if reader (car reader) nil)))
-		     (reader-doc   (when (and reader (stringp (cadr reader)))
-				     (cadr reader)))
-		     (final-reader (if reader
-				       (cons 'progn (if reader-doc
-							(cddr reader)
-							(cdr reader)))
-				       slot-name))
+		     (reader-docp (member slot-name reader-documentation-infos :key #'car))
+		     (reader-doc  (when reader-docp (caddar reader-docp)))
+		     (final-reader (if reader (cons 'progn (cdr reader)) slot-name))
 		     (used-slots (find-slot-names slot-names final-reader))
 		     (final-used-slots (mapcar (lambda (x) (if (member x pointer-slots)
 							       (list :pointer x)
 							       x))
 					       used-slots))
 		     (namep (member slot-name name-infos :key #'car))
-		     (name (if namep (cadar namep) slot-name)))
+		     (name (if namep (caddar namep) slot-name)))
 		(collect `(adp:defun ,(intern (concatenate 'string (symbol-name prefix) "-" (symbol-name name)))
 			    ,args
-			    ,@(when reader-doc
+			    ,@(when reader-docp
 				`(,reader-doc))
 			    (cffi:with-foreign-slots (,final-used-slots ,(car args) ,struct-type)
 			      ,final-reader))))))))
 
-  (defun create-writers-code (writer-infos pointer-slots name-infos struct-type
+  (defun create-writers-code (writer-infos writer-documentation-infos pointer-slots name-infos struct-type
 			      enable-default-writers enable-invisibles prefix)
     (let ((slot-names (cffi:foreign-slot-names struct-type)))
       (iter (for (slot-name invisiblep writer writerp) in writer-infos)
 	    (when (and (or enable-invisibles (not invisiblep))
 		       (or writer (and enable-default-writers (not writerp))))
 	      (let* ((object-arg (make-symbol "OBJECT"))
-		     (new-value-arg (if writer (caar writer) (gensym)))
+		     (new-value-arg (if writer (caar writer) (make-symbol "NEW-VALUE")))
 		     (args (if writer
 			       `(,new-value-arg ,object-arg ,@(cdar writer))
 			       `(,new-value-arg ,object-arg)))
-		     (writer-doc   (when (and writer (stringp (cadr writer)))
-				     (cadr writer)))
-		     (final-writer (if writer
-				       (cons 'progn (if writer-doc
-							(cddr writer)
-							(cdr writer)))
-				       `(setf ,slot-name ,new-value-arg)))
+		     (writer-docp (member slot-name writer-documentation-infos :key #'car))
+		     (writer-doc  (when writer-docp (caddar writer-docp)))
+		     (final-writer (if writer (cons 'progn (cdr writer)) `(setf ,slot-name ,new-value-arg)))
 		     (used-slots (find-slot-names slot-names final-writer))
 		     (final-used-slots (mapcar (lambda (x) (if (member x pointer-slots)
 							       (list :pointer x)
 							       x))
 					       used-slots))
 		     (namep (member slot-name name-infos :key #'car))
-		     (name (if namep (cadar namep) slot-name)))
+		     (name (if namep (caddar namep) slot-name)))
 		(collect `(adp:defun (setf ,(intern (concatenate 'string (symbol-name prefix) "-" (symbol-name name))))
 			    ,args
-			    ,@(when writer-doc
+			    ,@(when writer-docp
 				`(,writer-doc))
 			    (cffi:with-foreign-slots (,final-used-slots ,object-arg ,struct-type)
 			      ,final-writer))))))))
@@ -542,9 +553,15 @@ The last available option is :VIRTUAL. Using this option indicates that slot-nam
 	   (constructor-doc      (when (not no-constructorp)
 				   (extract-constructor-documentation slot-descriptors :constructor-documentation)))
 	   (destructor-doc       (when (not no-destructorp)
-				   (extract-constructor-documentation slot-descriptors :destructor-documentation))))
+				   (extract-constructor-documentation slot-descriptors :destructor-documentation)))
+	   (real-slot-descriptors (cond
+				    ((and constructor-doc destructor-doc)
+				     (cddr slot-descriptors))
+				    ((or constructor-doc destructor-doc)
+				     (cdr slot-descriptors))
+				    (t slot-descriptors))))
       (loop for slot-name in (cffi:foreign-slot-names struct-type)
-	    for pre-slot-descriptor = (car (member slot-name slot-descriptors :key (lambda (x) (if (listp x) (car x) x))))
+	    for pre-slot-descriptor = (car (member slot-name real-slot-descriptors :key (lambda (x) (if (listp x) (car x) x))))
 	    for slot-descriptor =     (if (listp pre-slot-descriptor) pre-slot-descriptor (list pre-slot-descriptor))
 	    for pointerp =       (member :pointer slot-descriptor)
 	    for pointer-value =  (cadr pointerp)
@@ -553,17 +570,19 @@ The last available option is :VIRTUAL. Using this option indicates that slot-nam
 	    for initformp =      (member :initform slot-descriptor)
 	    for initform-value = (cadr initformp)
 	    when pointer-value
-	      collect slot-name                                                         into pointer-slots
+	      collect slot-name                                                               into pointer-slots
 	    when namep
-	      collect (list slot-name name-value)                                       into name-infos
+	      collect (list slot-name name-value)                                             into name-infos
 	    when initformp
-	      collect (list slot-name initform-value)                                   into initform-infos
+	      collect (list slot-name initform-value)                                         into initform-infos
 	    when (not no-constructorp)
-	      collect (extract-descriptor-info slot-name slot-descriptor :constructor)  into constructor-infos
+	      collect (extract-descriptor-info slot-name slot-descriptor :constructor)        into constructor-infos
 	    when (not no-destructorp)
-	      collect (extract-descriptor-info slot-name slot-descriptor :destructor)   into destructor-infos
-	    collect (extract-descriptor-info slot-name slot-descriptor :reader)         into reader-infos
-	    collect (extract-descriptor-info slot-name slot-descriptor :writer)         into writer-infos
+	      collect (extract-descriptor-info slot-name slot-descriptor :destructor)         into destructor-infos
+	    collect (extract-descriptor-info slot-name slot-descriptor :reader)               into reader-infos
+	    collect (extract-descriptor-info slot-name slot-descriptor :reader-documentation) into reader-documentation-infos
+	    collect (extract-descriptor-info slot-name slot-descriptor :writer)               into writer-infos
+	    collect (extract-descriptor-info slot-name slot-descriptor :writer-documentation) into writer-documentation-infos
 	    finally (return `(progn
 			       ,@(unless no-constructorp
 				   (list (create-constructor-code constructor-infos constructor-doc
@@ -578,10 +597,10 @@ The last available option is :VIRTUAL. Using this option indicates that slot-nam
 			       ,@(unless (or no-constructorp
 					     no-destructorp)
 				   (list (create-with-code infix)))
-			       ,@(create-readers-code reader-infos pointer-slots name-infos struct-type
-						      default-readerp invisiblesp infix)
-			       ,@(create-writers-code writer-infos pointer-slots name-infos struct-type
-						      default-writerp invisiblesp infix)))))))
+			       ,@(create-readers-code reader-infos reader-documentation-infos pointer-slots name-infos
+						      struct-type default-readerp invisiblesp infix)
+			       ,@(create-writers-code writer-infos writer-documentation-infos pointer-slots name-infos
+						      struct-type default-writerp invisiblesp infix)))))))
 
 (adp:defmacro define-foreign-struct (struct-type infix options &body slot-descriptors)
   "This macro has the following syntax:
@@ -598,7 +617,8 @@ The last available option is :VIRTUAL. Using this option indicates that slot-nam
   destructor-docstring  ::= (:DESTRUCTOR-DOCUMENTATION docstring)
   slot-descriptor       ::= slot-name | (slot-name slot-option*)
   slot-name             ::= 'symbol'
-  slot-option           ::= { :NAME name } | { :POINTER pointer } | { :VIRTUAL virtual } | { :INITFORM initform } | { :CONSTRUCTOR constructor } | { :DESTRUCTOR destructor } | { :READER reader } | { :WRITER writer }
+  slot-option           ::= { :NAME name } | { :POINTER pointer } | { :VIRTUAL virtual } | { :INITFORM initform } | { :CONSTRUCTOR constructor } | { :DESTRUCTOR destructor } 
+                                           | { :READER reader } | { :READER-DOCUMENTATION docstring } | { :WRITER writer } | { :WRITER-DOCUMENTATION docstring }
   name                  ::= 'symbol'
   pointer               ::= 'form'
   virtual               ::= 'form'
@@ -607,10 +627,10 @@ The last available option is :VIRTUAL. Using this option indicates that slot-nam
   constructor-arg       ::= 'symbol'
   constructor-body      ::= 'form'
   destructor            ::= 'form'
-  reader                ::= NIL | (reader-lambda-list [docstring] reader-body*)
+  reader                ::= NIL | (reader-lambda-list reader-body*)
   reader-lambda-list    ::= 'lambda-list'
   reader-body           ::= 'form'
-  writer                ::= (writer-lambda-list [docstring] writer-body*)
+  writer                ::= (writer-lambda-list writer-body*)
   writer-lambda-list    ::= (new-value . rest-lambda-list)
   new-value             ::= 'symbol'
   rest-lambda-list      ::= 'lambda-list'
