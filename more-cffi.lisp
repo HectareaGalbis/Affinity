@@ -413,7 +413,16 @@ The last available option is :VIRTUAL. Using this option indicates that slot-nam
       (t (let ((key-expr (member keyword descriptor)))
 	   (list slot-name nil (cadr key-expr) (and key-expr t))))))
 
-  (defun create-constructor-code (constructor-infos constructor-doc pointer-slots name-infos initform-infos
+  (defun create-class-code (object-member class-doc virtual-slots name)
+    (let ((docstring (when class-doc (cadr class-doc))))
+      `(adp:defclass ,name ()
+	 (,object-member
+	  ,@virtual-slots)
+	 ,@(when docstring
+	     `((:documentation
+		,docstring))))))
+  
+  (defun create-constructor-code (constructor-infos constructor-doc object-member pointer-slots name-infos initform-infos
 				  struct-type enable-default-constructors enable-invisibles suffix)
     (let ((slot-names (cffi:foreign-slot-names struct-type)))
       (iter
@@ -563,12 +572,16 @@ The last available option is :VIRTUAL. Using this option indicates that slot-nam
       (loop for slot-name in (cffi:foreign-slot-names struct-type)
 	    for pre-slot-descriptor = (car (member slot-name real-slot-descriptors :key (lambda (x) (if (listp x) (car x) x))))
 	    for slot-descriptor =     (if (listp pre-slot-descriptor) pre-slot-descriptor (list pre-slot-descriptor))
+	    for virtualp =       (member :virtual slot-descriptor)
+	    fo virtual-value =   (cadr virtualp)
 	    for pointerp =       (member :pointer slot-descriptor)
 	    for pointer-value =  (cadr pointerp)
 	    for namep =          (member :name slot-descriptor)
 	    for name-value =     (cadr namep)
 	    for initformp =      (member :initform slot-descriptor)
 	    for initform-value = (cadr initformp)
+	    when virtual-value
+	      collect slot-name                                                               into virtual-slots
 	    when pointer-value
 	      collect slot-name                                                               into pointer-slots
 	    when namep
@@ -583,24 +596,26 @@ The last available option is :VIRTUAL. Using this option indicates that slot-nam
 	    collect (extract-descriptor-info slot-name slot-descriptor :reader-documentation) into reader-documentation-infos
 	    collect (extract-descriptor-info slot-name slot-descriptor :writer)               into writer-infos
 	    collect (extract-descriptor-info slot-name slot-descriptor :writer-documentation) into writer-documentation-infos
-	    finally (return `(progn
-			       ,@(unless no-constructorp
-				   (list (create-constructor-code constructor-infos constructor-doc
-								  pointer-slots name-infos
-								  initform-infos struct-type
-								  default-constructorp
-								  invisiblesp
-								  infix)))
-			       ,@(unless no-destructorp
-				   (list (create-destructor-code destructor-infos destructor-doc
-								 pointer-slots struct-type infix)))
-			       ,@(unless (or no-constructorp
-					     no-destructorp)
-				   (list (create-with-code infix)))
-			       ,@(create-readers-code reader-infos reader-documentation-infos pointer-slots name-infos
-						      struct-type default-readerp invisiblesp infix)
-			       ,@(create-writers-code writer-infos writer-documentation-infos pointer-slots name-infos
-						      struct-type default-writerp invisiblesp infix)))))))
+	    finally (return (let ((object-member '#:foreign-object))
+			      `(progn
+				 ,(create-class-code object-member virtual-slots)
+				 ,@(unless no-constructorp
+				     (list (create-constructor-code constructor-infos constructor-doc
+								    pointer-slots name-infos
+								    initform-infos struct-type
+								    default-constructorp
+								    invisiblesp
+								    infix)))
+				 ,@(unless no-destructorp
+				     (list (create-destructor-code destructor-infos destructor-doc
+								   pointer-slots struct-type infix)))
+				 ,@(unless (or no-constructorp
+					       no-destructorp)
+				     (list (create-with-code infix)))
+				 ,@(create-readers-code reader-infos reader-documentation-infos pointer-slots name-infos
+							struct-type default-readerp invisiblesp infix)
+				 ,@(create-writers-code writer-infos writer-documentation-infos pointer-slots name-infos
+							struct-type default-writerp invisiblesp infix))))))))
 
 (adp:defmacro define-foreign-struct (struct-type infix options &body slot-descriptors)
   "This macro has the following syntax:
@@ -636,9 +651,9 @@ The last available option is :VIRTUAL. Using this option indicates that slot-nam
   rest-lambda-list      ::= 'lambda-list'
   docstring             ::= 'string'
   
-Define a wraper around the foreign struct (or union) STRUCT-TYPE. Each INFIX-NAME is used to generate the function names.
-In fact, for each INFIX-NAME, a constructor, destructor and set of accessors are defined. You should use this if multiple C types
-refer to the same struct type.
+Define a wraper around the foreign struct (or union) STRUCT-TYPE. Each INFIX-NAME is used to generate the class name and the function names.
+In fact, for each INFIX-NAME, a constructor, destructor and set of accessors are defined. You should use multiple INFIX-NAMEs
+if multiple C types refer to the same struct type.
 
 OPTIONS is a list of keywords that modify the way this macro works. If :NO-CONSTRUCTOR is specified, then this macro will 
 not define a constructor. In the same way, if :no-destructor is specified no destructor will be defined. If :DEFAULT-CONSTRUCTORS
@@ -647,7 +662,7 @@ done (no translation). The same occurs with :DEFAULT-READERS and :DEFAULT-WRITER
 to write every slot you want to define a constructor, destructor, reader or writer for. However, if :INCLUDE-INVISIBLES is used 
 that functions are defined even if you don't specify the existence of that slot.
 
-Using CONSTRUCTOR-DOCSTRING and DESTRUCTOR-DOCSTRING adds a docstring to the constructor and destructor respectively.
+Using CONSTRUCTOR-DOCUMENTATION and DESTRUCTOR-DOCUMENTATION adds a docstring to the constructor and destructor respectively.
 
 Each SLOT-DESCRIPTOR specify the translation of a foreign struct member. The SLOT-NAME is a symbol denoting a foreign member of 
 the struct STRUCT-TYPE (unless :VIRTUAL is used). The different options allow you to specify the translations of each member:
@@ -676,7 +691,7 @@ the struct STRUCT-TYPE (unless :VIRTUAL is used). The different options allow yo
   - POINTER:     Some structs have as a member another struct. You may want to use its pointer rather than the struct itself. To do that you only need to
                  use a non-NIL expression after :POINTER.
   
-  - VIRTUAL:     Using :VIRTUAL you can receive an additional parameter in the constructor, or create additional accessors.
+  - VIRTUAL:     Using :VIRTUAL you can create additional struct members. Like the rest ones, it can have its own constructor, destructor and accessors. 
 
 An additional note: If :NO-CONSTRUCTOR and :NO-DESTRUCTOR are NOT used, then a 'with-constructor' is defined. See the Clith project for more information."
   (check-foreign-struct-struct-type struct-type)
