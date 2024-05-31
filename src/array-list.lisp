@@ -42,3 +42,8 @@
 
 ;; Con la definicion de pointer, se podra controlar que ocurre con las asignaciones de un elemento en concreto
 ;; del array.
+
+
+;; NOTA
+;; El tipo pointer podra tiene una lista de subpunteros de los que será dueño. Al tener que liberar el
+;; puntero principal se liberarán antes los subpunteros.
