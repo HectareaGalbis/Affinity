@@ -126,3 +126,33 @@
                                   :cpointer ,cvar
                                   :type :void)))
          ,@body))))
+
+
+;; struct related
+
+(defun foreign-slot-pointer (ptr slot-name)
+  (check-type ptr pointer)
+  (with (((cpointer type) (slots ptr)))
+    (cffi:foreign-slot-pointer cpointer type slot-name)))
+
+(defun foreign-slot-value (ptr slot-name)
+  (check-type ptr pointer)
+  (with (((cpointer type) (slots ptr)))
+    (cffi:foreign-slot-value cpointer type slot-name)))
+
+(defun (setf foreign-slot-value) (new-value ptr slot-name)
+  (check-type ptr pointer)
+  (with (((cpointer type) (slots ptr)))
+    (setf (cffi:foreign-slot-value cpointer type slot-name) new-value)))
+
+(defmacro with-foreign-object ((var type &optional count) &body body)
+  (with-gensyms (cvar ev-type)
+    `(let ((,ev-type ,type))
+       (cffi:with-foreign-object (,cvar ,ev-type ,count)
+         (let ((,var (make-instance 'pointer
+                                    :cpointer ,cvar
+                                    :type ,ev-type)))
+           ,@body)))))
+
+(defmacro with-foreign-slots ((vars ptr) &body body)
+  )
