@@ -30,9 +30,6 @@
 
 ;; ------ public functions ------
 
-(defvar *owner* nil
-  "The pointer that will own the next allocated memory")
-
 (defun foreign-free (ptr)
   (check-type ptr pointer)
   (with (((cpointer subpointers) (slots ptr)))
