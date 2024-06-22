@@ -171,25 +171,27 @@
            ,@body)))))
 
 
-(defun make-foreign-slot-binding (var ptr-sym type-sym)
-  (cond
-    ((symbolp var)
-     `(,var (cffi:foreign-slot-value ,ptr-sym ,type-sym ',var)))
-    ((listp var)
-     (let ((num-elems (length var)))
-       (when (not (null var))
-         (let ((binding-var (car var)))
-           (cond
-             ((= num-elems 1)
-              `(,binding-var (cffi:foreign-slot-value ,ptr-sym ,type-sym ',binding-var)))
-             ((= num-elems 2)
-              (let ((option (cadr var)))
-                (if (eq option :pointer)
-                    `(,binding-var (cffi:foreign-slot-pointer ,ptr-sym ,type-sym ',binding-var))
-                    `(,binding-var (cffi:foreign-slot-value ,ptr-sym ,type-sym ',option)))))
-             ((and (= num-elems 3) (member :pointer var))
-              (let ((slot (if (eq (cadr var) :pointer) (caddr var) (cadr var))))
-                `(,binding-var (cffi:foreign-slot-pointer ,ptr-sym ,type-sym ',slot)))))))))))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  
+  (defun make-foreign-slot-binding (var ptr-sym type-sym)
+    (cond
+      ((symbolp var)
+       `(,var (cffi:foreign-slot-value ,ptr-sym ,type-sym ',var)))
+      ((listp var)
+       (let ((num-elems (length var)))
+         (when (not (null var))
+           (let ((binding-var (car var)))
+             (cond
+               ((= num-elems 1)
+                `(,binding-var (cffi:foreign-slot-value ,ptr-sym ,type-sym ',binding-var)))
+               ((= num-elems 2)
+                (let ((option (cadr var)))
+                  (if (eq option :pointer)
+                      `(,binding-var (cffi:foreign-slot-pointer ,ptr-sym ,type-sym ',binding-var))
+                      `(,binding-var (cffi:foreign-slot-value ,ptr-sym ,type-sym ',option)))))
+               ((and (= num-elems 3) (member :pointer var))
+                (let ((slot (if (eq (cadr var) :pointer) (caddr var) (cadr var))))
+                  `(,binding-var (cffi:foreign-slot-pointer ,ptr-sym ,type-sym ',slot))))))))))))
 
 (defmacro with-foreign-slots ((vars ptr) &body body)
   (with-gensyms (ptr-sym type-sym)
