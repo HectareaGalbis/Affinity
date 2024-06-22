@@ -26,9 +26,9 @@
 
 
 ;; ------ owned ------
-(defgeneric get-owner (owned)
+(defgeneric get-owner (obj)
   (:documentation
-   "Retrieve the owner of OWNED. If OWNED is not owned by anyone, NIL is returned."))
+   "Retrieve the owner of OBJ. If OBJ is not owned by anyone, NIL is returned."))
 
 (defgeneric set-owner (obj owner)
   (:documentation

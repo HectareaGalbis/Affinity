@@ -1,5 +1,6 @@
 
 (in-package #:mcffi)
+(in-readtable mcffi)
 
 
 (cffi:define-foreign-type pointer-type ()
@@ -12,7 +13,9 @@
   ((cpointer :initarg :cpointer)
    (type :initarg :type)
    (subpointers :initarg :subpointers
-                :initform nil)))
+                :initform nil)
+   (owner :initarg :owner
+          :initform nil)))
 
 (defmethod cffi:translate-to-foreign ((object pointer) (obj-type pointer-type))
   (declare (ignore obj-type))
@@ -27,9 +30,25 @@
   (declare (ignore param))
   (values))
 
+(defmethod own ((owner pointer) (obj pointer))
+  (with ((subpointers (slots owner)))
+    (push obj subpointers)))
+
+(defmethod disown ((owner pointer) (obj pointer))
+  (with ((subpointers (slots owner)))
+    (setf subpointers (delete obj subpointers :test 'eq))))
+
+(defmethod get-owned ((owner pointer))
+  (slot-value owner 'subpointers))
+
+(defmethod get-owner ((obj pointer))
+  (slot-value obj 'owner))
+
+(defmethod set-owner ((obj pointer) owner)
+  (setf (slot-value obj 'owner) owner))
+
 
 ;; ------ public functions ------
-
 (defun foreign-free (ptr)
   (check-type ptr pointer)
   (with (((cpointer subpointers) (slots ptr)))
@@ -38,13 +57,13 @@
     (cffi:foreign-free cpointer)))
 
 (defun foreign-alloc (type &rest args &key initial-element initial-contents (count 1) null-terminated-p)
-  (let ((cpointer (apply #'cffi:foreign-alloc type args)))
+  (let* ((cpointer (apply #'cffi:foreign-alloc type args))
+         (pointer-instance (make-instance 'pointer
+                                          :cpointer cpointer
+                                          :type type)))
     (when *owner*
-      (with ((subpointers (slots *owner*)))
-        (push cpointer subpointers)))
-    (make-instance 'pointer
-                   :cpointer cpointer
-                   :type type)))
+      (establish-ownership *owner* pointer-instance))
+    (values pointer-instance)))
 
 (defun foreign-symbol-pointer (foreign-name type &rest args &key library)
   (let ((cpointer (apply #'cffi:foreign-symbol-pointer foreign-name args)))
@@ -151,5 +170,30 @@
                                     :type ,ev-type)))
            ,@body)))))
 
+
+(defun make-foreign-slot-binding (var ptr-sym type-sym)
+  (cond
+    ((symbolp var)
+     `(,var (cffi:foreign-slot-value ,ptr-sym ,type-sym ',var)))
+    ((listp var)
+     (let ((num-elems (length var)))
+       (when (not (null var))
+         (let ((binding-var (car var)))
+           (cond
+             ((= num-elems 1)
+              `(,binding-var (cffi:foreign-slot-value ,ptr-sym ,type-sym ',binding-var)))
+             ((= num-elems 2)
+              (let ((option (cadr var)))
+                (if (eq option :pointer)
+                    `(,binding-var (cffi:foreign-slot-pointer ,ptr-sym ,type-sym ',binding-var))
+                    `(,binding-var (cffi:foreign-slot-value ,ptr-sym ,type-sym ',option)))))
+             ((and (= num-elems 3) (member :pointer var))
+              (let ((slot (if (eq (cadr var) :pointer) (caddr var) (cadr var))))
+                `(,binding-var (cffi:foreign-slot-pointer ,ptr-sym ,type-sym ',slot)))))))))))
+
 (defmacro with-foreign-slots ((vars ptr) &body body)
-  )
+  (with-gensyms (ptr-sym type-sym)
+    (let ((macrolet-bindings (mapcar #¿(make-foreign-slot-binding ? ptr-sym type-sym) (ensure-list vars))))
+      `(with ((((,ptr-sym cpointer) (,type-sym type)) (slots ,ptr)))
+         (symbol-macrolet ,macrolet-bindings
+           ,@body)))))
