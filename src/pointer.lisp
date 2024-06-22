@@ -199,3 +199,7 @@
       `(with ((((,ptr-sym cpointer) (,type-sym type)) (slots ,ptr)))
          (symbol-macrolet ,macrolet-bindings
            ,@body)))))
+
+(defwith foreign-slots ((vars ptr) &body body)
+  `(with-foreign-slots (,vars ,ptr)
+     ,@body))
