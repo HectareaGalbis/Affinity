@@ -73,3 +73,11 @@
          ,(make-translate-into-foreign-memory actual-class-name type-class)
 
          ,(make-translate-aggregate-to-foreign actual-class-name type-class)))))
+
+
+;; TODO:
+;; Crear deferred types. Tambien, deben de haber deferred functions y deferred structures.
+;; Un deferred type es un tipo que puede usar los valores de una estructura normal o de unos argumentos normales de una función.
+;; De esta forma se pueden crear tipos de datos que dependan de otros tipos.
+;; Como ejemplo, se puede crear el tipo (ptr-array ctype :size var). Es un puntero a un array de typo ctype y que la cantidad
+;; de elementos viene dada por var, que será otro miembro de la estructura o otro argumento de la función.
