@@ -1,5 +1,10 @@
 
 
-(defpackage #:more-cffi
+(defpackage #:affinity
   (:use #:cl #:alexandria #:named-readtables #:clith)
-  (:nicknames #:mcffi))
+  (:nicknames #:affi)
+  (:import-from #:cffi
+                #:define-foreign-library
+                #:use-foreign-library)
+  (:export #:define-foreign-library
+           #:use-foreign-library))

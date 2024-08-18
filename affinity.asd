@@ -1,10 +1,10 @@
 
 
-(defsystem "more-cffi"
+(defsystem "affinity"
   :author "Hector Galbis Sanchis <hectometrocuadrado@gmail.com>"
-  :description "Extension of the CFFI project. A facility to wrap C bindings."
+  :description "A higher layer of abstraction over CFFI."
   :license "MIT"
-  :depends-on ("cffi" "clith" "alexandria" "named-readtables" "allioli")
+  :depends-on ("cffi" "clith" "alexandria" "named-readtables" "allioli" "expanders")
   :serial t
   :components ((:file "src/package")
                (:file "src/readtable")
@@ -13,7 +13,7 @@
                              (:file "pointer")))))
 
 
-;; (asdf:defsystem "more-cffi/doc"
+;; (asdf:defsystem "affinity/doc"
 ;;   :author "Hector Galbis Sanchis <hectometrocuadrado@gmail.com>"
 ;;   :description "Extension of the CFFI project. A facility to wrap C bindings and write documentation."
 ;;   :defsystem-depends-on ("adp-github")

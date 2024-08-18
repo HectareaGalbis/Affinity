@@ -13,9 +13,7 @@
   ((cpointer :initarg :cpointer)
    (ctype :initarg :ctype)
    (subpointers :initarg :subpointers
-                :initform nil)
-   (owner :initarg :owner
-          :initform nil)))
+                :initform nil)))
 
 (defmethod cffi:translate-to-foreign ((object pointer) (obj-type pointer-type))
   (declare (ignore obj-type))
@@ -30,56 +28,46 @@
   (declare (ignore param))
   (values))
 
-;; TODO: Implement expand methods
 
 
-(defmethod own ((owner pointer) (obj pointer))
-  (with ((subpointers (slots owner)))
-    (push obj subpointers)))
-
-(defmethod disown ((owner pointer) (obj pointer))
-  (with ((subpointers (slots owner)))
-    (setf subpointers (delete obj subpointers :test 'eq))))
-
-(defmethod get-owned ((owner pointer))
-  (slot-value owner 'subpointers))
-
-(defmethod get-owner ((obj pointer))
-  (slot-value obj 'owner))
-
-(defmethod set-owner ((obj pointer) owner)
-  (setf (slot-value obj 'owner) owner))
+(defgeneric get-structure-value (ptr name slot))
+(defgeneric (setf get-structure-value) (new-value ptr name slot))
 
 
 (defmethod slot-missing (class (obj pointer) slot-name (op (eql 'slot-value)) &optional new-value)
-  (with (((cpointer ctype) (slots obj)))
-    (if (member slot-name (cffi:foreign-slot-names ctype))
-        (cffi:foreign-slot-value cpointer ctype slot-name)
-        (call-next-method))))
+  (with ((ctype (slots obj)))
+    (unless (eq (car ctype) :struct)
+      (error "This pointer does not point to a structure."))
+    (get-structure-value obj (cadr ctype) slot-name)))
 
 (defmethod slot-missing (class (obj pointer) slot-name (op (eql 'setf)) &optional new-value)
-  (with ((*owner* obj)
-         ((cpointer ctype) (slots obj)))
-    (if (member slot-name (cffi:foreign-slot-names ctype))
-        (setf (cffi:foreign-slot-value cpointer ctype slot-name) new-value)
-        (call-next-method))))
-
-(defmethod slot-missing (class (obj pointer) slot-name (op (eql 'slot-boundp)) &optional new-value)
-  (member slot-name (cffi:foreign-slot-names ctype)))
-
-(defmethod slot-missing (class (obj pointer) slot-name (op (eql 'slot-makunbound)) &optional new-value)
   (with ((ctype (slots obj)))
-    (if (member slot-name (cffi:foreign-slot-names ctype))
-        (error "The slot ~s cannot be unbound." slot-name)
-        (call-next-method))))
+    (unless (eq (car ctype) :struct)
+      (error "This pointer does not point to a structure."))
+    (setf (get-structure-value obj (cadr ctype) slot-name))))
+
+;; TODO: Use get-structure-slot-names from structure.lisp
+
+;; (defmethod slot-missing (class (obj pointer) slot-name (op (eql 'slot-boundp)) &optional new-value)
+;;   (member slot-name (cffi:foreign-slot-names ctype)))
+
+;; (defmethod slot-missing (class (obj pointer) slot-name (op (eql 'slot-makunbound)) &optional new-value)
+;;   (with ((ctype (slots obj)))
+;;     (if (member slot-name (cffi:foreign-slot-names ctype))
+;;         (error "The slot ~s cannot be unbound." slot-name)
+;;         (call-next-method))))
 
 
-;; ------ public functions ------
+
+(defun cast-pointer (type ptr)
+  "Change the type of the pointer."
+  (check-type ptr pointer)
+  (with ((ctype (slots ptr)))
+    (setf ctype type)))
+
 (defun foreign-free (ptr)
   (check-type ptr pointer)
-  (with (((cpointer subpointers) (slots ptr)))
-    (loop for subpointer in subpointers
-          do (cffi:foreign-free subpointer))
+  (with ((cpointer (slots ptr)))
     (cffi:foreign-free cpointer)))
 
 (defun foreign-alloc (ctype &rest args &key initial-element initial-contents (count 1) null-terminated-p)
@@ -87,8 +75,6 @@
          (pointer-instance (make-instance 'pointer
                                           :cpointer cpointer
                                           :ctype ctype)))
-    (when *owner*
-      (establish-ownership *owner* pointer-instance))
     (values pointer-instance)))
 
 (defun foreign-symbol-pointer (foreign-name ctype &rest args &key library)
@@ -123,8 +109,7 @@
 
 (defun (setf mem-aref) (new-value ptr &optional (index 0))
   (check-type ptr pointer)
-  (with ((*owner* ptr)
-         ((cpointer ctype) (slots ptr)))
+  (with (((cpointer ctype) (slots ptr)))
     (setf (cffi:mem-aref cpointer ctype index) new-value)))
 
 (defun mem-ref (ptr &optional offset)
@@ -134,8 +119,7 @@
 
 (defun (setf mem-ref) (new-value ptr &optional offset)
   (check-type ptr pointer)
-  (with ((*owner* ptr)
-         ((cpointer ctype) (slots ptr)))
+  (with (((cpointer ctype) (slots ptr)))
     (setf (cffi:mem-ref cpointer ctype offset) new-value)))
 
 (defun null-pointer ()
@@ -184,8 +168,7 @@
 
 (defun (setf foreign-slot-value) (new-value ptr slot-name)
   (check-type ptr pointer)
-  (with ((*owner* ptr)
-         ((cpointer ctype) (slots ptr)))
+  (with (((cpointer ctype) (slots ptr)))
     (setf (cffi:foreign-slot-value cpointer ctype slot-name) new-value)))
 
 (defmacro with-foreign-object ((var ctype &optional count) &body body)

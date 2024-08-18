@@ -1,81 +1,76 @@
 
-(in-package #:mcffi)
+(in-package #:affinity)
+(in-readtable #:affinity)
+
+
+;; TODO: get-structure-slot-names
 
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
 
-  (defun make-defclass-class-name (class-name)
-    (car (ensure-list class-name)))
+  (defstruct slot-info
+    name
+    type
+    lens
+    visible)
+
+  (defun process-slot (slot)
+    (let ((name (car slot))
+          (type (cadr slot))
+          (lens (getf (cddr slot) :lens))
+          (visible (getf (cddr slot)) :visible))
+      (make-slot-info :name name :type type :lens lens :visible visible)))
   
-  (defun make-defclass-slot-specifier (slot-specifier)
-    (with ((slot-copy (copy-list slot-specifier)))
-      (remf slot-copy :count)
-      (remf slot-copy :offset)
-      (values slot-copy)))
+  (defun process-slots (slots)
+    (mapcar #'process-slot slots))
 
-  (defun make-defclass (class-name super-classes slot-specifiers class-options)
-    `(defclass ,class-name ,super-classes
-       ,(mapcar #'make-defclass-slot-specifier slot-specifiers)
-       ,@class-options))
+  (defun make-c-slot (slot-info)
+    (with-slots (name type) c-slot
+      `(,name ,type)))
+  
+  (defun make-c-slots (slot-infos)
+    (let ((c-slots (remove-if-not #¿(with-slots (type) ? type) slot-infos)))
+      (loop for c-slot in c-slots
+            collect (make-c-slot c-slot))))
 
-  (defun make-defcstruct-class-name (class-name type-class)
-    (with ((defcstruct-class-name (ensure-list class-name)))
-      `(,@defcstruct-class-name :class ,type-class)))
+  (defun make-getter (class-name slot-info)
+    (with-slots (name lens) slot-info
+      (let ((getter-name (symbolicate class-name "-" name)))
+        (with-gensyms (ptr name-sym slot-sym)
+          (let ((getter-body (if lens
+                                 (exp:expand 'lens-getter `(,(car lens) ',name ,@(cdr lens)))
+                                 `(foreign-slot-value ,ptr ',name))))
+            `((defun ,getter-name (,ptr)
+                ,getter-body)
+              (defmethod get-structure-value (,ptr (,name-sym (eql ',class-name)) (,slot-sym (eql ',name)))
+                (declare (ignore ,name-sym ,slot-sym))
+                ,getter-body)))))))
 
-  (defun make-defcstruct-slot-specifier (slot-specifier)
-    (with ((slot-name (car slot-specifier))
-           (slot-options (cdr slot-specifier))
-           (ctype (getf slot-options :ctype))
-           (count (getf slot-options :count))
-           (offset (getf slot-options :offset)))
-      `(,slot-name ,ctype ,@(when count `(:count ,count)) ,@(when offset `(:offset ,offset)))))
+  (defun make-getters (class-name slot-infos)
+    (let ((public-slots (remove-if-not #¿(with-slots (visible) ? visible) slot-infos)))
+      (mapcan #'make-getter class-name public-slots)))
 
-  (defun make-defcstruct (class-name type-class slot-specifiers)
-    `(cffi:defcstruct ,(make-defcstruct-class-name class-name type-class)
-       ,@(mapcar #'make-defcstruct-slot-specifier slot-specifiers)))
+  (defun make-setter (class-name slot-info)
+    (with-slots (name lens) slot-info
+      (let ((getter-name (symbolicate class-name "-" name)))
+        (with-gensyms (new-value ptr)
+          (let ((setter-body (if lens
+                                 (exp:expand 'lens-setter `(,(car lens) ',name ,@(cdr lens)))
+                                 `(setf (foreign-slot-value ,ptr ',name) ,new-value))))
+            `((defun (setf ,getter-name) (,new-value ,ptr)
+                ,setter-body)
+              (defmethod (setf get-structure-value) (,new-value ,ptr (,name-sym (eql ',class-name)) (,slot-sym (eql ',name)))
+                (declare (ignore ,name-sym ,slot-sym))
+                ,setter-body)))))))
 
-  (defun make-translate-to-foreign (class-name type-class)
-    (with-gensyms (pointer obj-type instance)
-      `(defmethod cffi:translate-from-foreign (,pointer (,obj-type ,type-class))
-         (declare (ignore ,obj-type))
-         (let ((,instance (make-instance ',class-name)))
-           ,@(let ((struct-type `(:struct ,class-name)))
-               (loop for slot in (cffi:foreign-slot-names struct-type)
-                     collect `(setf (slot-value ,instance ',slot)
-                                    (cffi:foreign-slot-value ,pointer ',struct-type ',slot))))))))
+  (defun make-setters (class-name slot-infos)
+    (let ((public-slots (remove-if-not #¿(with-slots (visible) ? visible) slot-infos)))
+      (mapcan #¿(make-setter class-name ?) public-slots))))
 
-  (defun make-translate-into-foreign-memory (class-name type-class)
-    (with-gensyms (object obj-type pointer)
-      `(defmethod cffi:translate-into-foreign-memory ((,object ,class-name) (,obj-type ,type-class) ,pointer)
-         (declare (ignore ,obj-type))
-         ,@(let ((struct-type `(:struct ,class-name)))
-             (loop for slot in (cffi:foreign-slot-names struct-type)
-                   collect `(setf (cffi:foreign-slot-value ,pointer ',struct-type ',slot)
-                                  (slot-value ,object ',slot)))))))
-
-  (defun make-translate-aggregate-to-foreign (class-name type-class)
-    (with-gensyms (object obj-type pointer)
-      `(defmethod cffi::translate-aggregate-to-foreign ((,object ,class-name) (,obj-type ,type-class) ,pointer)
-         (cffi:translate-into-foreign-memory ,object ,obj-type ,pointer)))))
-
-
-(defmacro defcclass (class-name (&rest superclass-names) (&rest slot-specifiers) &rest class-options)
-  (with-gensyms (type-class)
-    (let ((actual-class-name (make-defclass-class-name class-name)))
+(defmacro defcstruct (name slots)
+    (let ((slot-infos (process-slots slots)))
       `(progn
-
-         ,(make-defclass class-name superclass-names slot-specifiers class-options)
-
-         ,(make-defcstruct class-name type-class slot-specifiers)
-
-         ,(make-translate-to-foreign actual-class-name type-class)
-
-         ,(make-translate-into-foreign-memory actual-class-name type-class)
-
-         ,(make-translate-aggregate-to-foreign actual-class-name type-class)))))
-
-
-;; TODO:
-;; Crear lentes. Una lente parece un tipo normal, pero tiene acceso a la estructura o lista de argumentos a la que pertenece.
-;; De esta forma, una lente puede aprovecharse del valor de otros miembros.
-;; El tipo pointer y struct estan bien como estan. Solo falta crear una lente para cada uno que tengan en cuenta otras lentes.
+         (cffi:defcstruct ,name
+           ,@(make-c-slots slot-infos))
+         ,@(make-getters name slot-infos)
+         ,@(make-setters name slot-infos))))
