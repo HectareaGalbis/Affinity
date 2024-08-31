@@ -8,16 +8,21 @@
 ;; Por tanto:
 ;; Los tipos primitivos devuelven:
 ;;  - El tipo cffi que representan
-(exp:defexpander primitive-affi-types define-primitive-affi-type primitive-affi-type-p)
+(exp:defexpander primitive-affi-types)
 
-(define-primitive-affi-type :pointer (inner-affi-type) `(pointer ,inner-affi-type))
+(exp:defexpansion primitive-affi-types :pointer (inner-affi-type)
+  `(pointer ,inner-affi-type))
+
+(exp:defexpansion primitive-affi-types :callback (callback-type)
+  (declare (ignore callback-type))
+  :pointer)
 ;; Lo mismo para las estructuras, callbacks, enums, ...
 
 
 (defun affi-to-cffi (type)
   (let ((expander (car (ensure-list type))))
-    (if (primitive-affi-type-p expander)
-        (exp:expand type)
+    (if (exp:expansionp 'primitive-affi-types expander)
+        (exp:expand 'primitive-affi-types type)
         type)))
 
 (defmacro defctype (name (&rest args) &body body)

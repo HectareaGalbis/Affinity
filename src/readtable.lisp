@@ -1,6 +1,6 @@
 
-(in-package #:mcffi)
+(in-package #:affinity)
 
 
-(defreadtable mcffi
+(defreadtable affinity
   (:merge :common-lisp allioli:syntax))

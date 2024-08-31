@@ -1,6 +1,6 @@
 
-(in-package #:mcffi)
-(in-readtable mcffi)
+(in-package #:affinity)
+(in-readtable affinity)
 
 
 (cffi:define-foreign-type pointer-type ()

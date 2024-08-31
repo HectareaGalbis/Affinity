@@ -9,8 +9,9 @@
   :components ((:file "src/package")
                (:file "src/readtable")
                (:module "src"
-                :components ((:file "owner")
-                             (:file "pointer")))))
+                :serial t
+                :components ((:file "types")
+                             (:file "callback")))))
 
 
 ;; (asdf:defsystem "affinity/doc"
