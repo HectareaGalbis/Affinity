@@ -3,9 +3,6 @@
 (in-readtable #:affinity)
 
 
-;; TODO: get-structure-slot-names
-
-
 (eval-when (:compile-toplevel :load-toplevel :execute)
 
   (defstruct slot-info
@@ -26,51 +23,63 @@
 
   (defun make-c-slot (slot-info)
     (with-slots (name type) c-slot
-      `(,name ,type)))
+      `(,name ,type))) ;; TODO: affi-to-cffi??
   
   (defun make-c-slots (slot-infos)
-    (let ((c-slots (remove-if-not #¿(with-slots (type) ? type) slot-infos)))
-      (loop for c-slot in c-slots
-            collect (make-c-slot c-slot))))
+    (loop for slot-info in slot-infos
+          collect (make-c-slot slot-info)))
 
-  (defun make-getter (class-name slot-info)
+  (defun make-defcstruct (name slot-infos)
+    `(cffi:defcstruct ,name
+       ,@(make-c-slots slot-infos)))
+
+  (defun make-struct-slot (slot-info)
+    (slot-value slot-info 'name))
+  
+  (defun make-struct-slots (slot-infos)
+    (loop for slot-info in slot-infos
+          if (slot-value slot-info 'visible)
+            collect (make-struct-slot slot-info)))
+
+  (defun make-defstruct (name slot-infos)
+    `(defstruct ,name
+       ,@(make-struct-slots slot-infos)))
+
+  (defun make-pointer-getter (class-name slot-info)
     (with-slots (name lens) slot-info
       (let ((getter-name (symbolicate class-name "-" name)))
         (with-gensyms (ptr name-sym slot-sym)
           (let ((getter-body (if lens
                                  (exp:expand 'lens-getter `(,(car lens) ',name ,@(cdr lens)))
                                  `(foreign-slot-value ,ptr ',name))))
-            `((defun ,getter-name (,ptr)
-                ,getter-body)
-              (defmethod get-structure-value (,ptr (,name-sym (eql ',class-name)) (,slot-sym (eql ',name)))
-                (declare (ignore ,name-sym ,slot-sym))
-                ,getter-body)))))))
+            `(defmethod get-structure-value (,ptr (,name-sym (eql ',class-name)) (,slot-sym (eql ',name)))
+               (declare (ignore ,name-sym ,slot-sym))
+               ,getter-body))))))
 
-  (defun make-getters (class-name slot-infos)
-    (let ((public-slots (remove-if-not #¿(with-slots (visible) ? visible) slot-infos)))
-      (mapcan #'make-getter class-name public-slots)))
+  (defun make-pointer-getters (class-name slot-infos)
+    (loop for slot-info in slot-infos
+          if (slot-value slot-info 'visible)
+            collect (make-pointer-getter class-name slot-info)))
 
-  (defun make-setter (class-name slot-info)
+  (defun make-pointer-setter (class-name slot-info)
     (with-slots (name lens) slot-info
       (let ((getter-name (symbolicate class-name "-" name)))
         (with-gensyms (new-value ptr)
           (let ((setter-body (if lens
                                  (exp:expand 'lens-setter `(,(car lens) ',name ,@(cdr lens)))
                                  `(setf (foreign-slot-value ,ptr ',name) ,new-value))))
-            `((defun (setf ,getter-name) (,new-value ,ptr)
-                ,setter-body)
-              (defmethod (setf get-structure-value) (,new-value ,ptr (,name-sym (eql ',class-name)) (,slot-sym (eql ',name)))
-                (declare (ignore ,name-sym ,slot-sym))
-                ,setter-body)))))))
+            `(defmethod (setf get-structure-value) (,new-value ,ptr (,name-sym (eql ',class-name)) (,slot-sym (eql ',name)))
+               (declare (ignore ,name-sym ,slot-sym))
+               ,setter-body))))))
 
-  (defun make-setters (class-name slot-infos)
-    (let ((public-slots (remove-if-not #¿(with-slots (visible) ? visible) slot-infos)))
-      (mapcan #¿(make-setter class-name ?) public-slots))))
+  (defun make-pointer-setters (class-name slot-infos)
+    (loop for slot-info in slot-infos
+          if (slot-value slot-info 'visible)
+            collect (make-pointer-setter class-name slot-info))))
 
 (defmacro defcstruct (name slots)
-    (let ((slot-infos (process-slots slots)))
-      `(progn
-         (cffi:defcstruct ,name
-           ,@(make-c-slots slot-infos))
-         ,@(make-getters name slot-infos)
-         ,@(make-setters name slot-infos))))
+  (let ((slot-infos (process-slots slots)))
+    `(progn
+       ,(make-defcstruct name slot-infos)
+       ,@(make-pointer-getters name slot-infos)
+       ,@(make-pointer-setters name slot-infos))))

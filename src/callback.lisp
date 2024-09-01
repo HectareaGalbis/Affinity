@@ -3,21 +3,6 @@
 (in-named-readtable affinity)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 (exp:defexpander callback-expander)
 
 
