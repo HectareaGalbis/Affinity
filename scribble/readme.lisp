@@ -1,5 +1,5 @@
 
-(in-package :mcffi)
+(in-package :affinity)
 
 (adp:in-file #P"README.md")
 

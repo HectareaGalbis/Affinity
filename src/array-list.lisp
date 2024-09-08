@@ -22,6 +22,7 @@
     (loop for i from 0 below count
           collect (cffi:mem-aref pointer type i))))
 
+;; TODO: Borrar esto al implementar owners.
 (defmethod cffi:free-translated-object (pointer (obj-type array-list) param)
   (declare (ignore param))
   (free-into-foreign-memory obj-type pointer)
@@ -33,7 +34,7 @@
           for elem in object
           do (setf (cffi:mem-aref pointer type i) elem))))
 
-(defmethod cffi::translate-aggregate-to-foreign ((object list) (obj-type array-list) pointer)
+(defmethod cffi::translate-aggregate-to-foreign (pointer (object list) (obj-type array-list))
   (cffi:translate-into-foreign-memory object obj-type pointer))
 
 
