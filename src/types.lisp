@@ -10,14 +10,17 @@
 ;;  - El tipo cffi que representan
 (exp:defexpander primitive-affi-types)
 
-(exp:defexpansion primitive-affi-types :pointer (inner-affi-type)
+(defmacro define-primitive-affi-type (name (&rest args) &body body)
+  `(exp:defexpansion primitive-affi-types ,name ,args
+     ,@body))
+
+(define-primitive-affi-type :pointer (inner-affi-type)
   `(pointer ,inner-affi-type))
 
-(exp:defexpansion primitive-affi-types :callback (callback-type)
+(define-primitive-affi-type :callback (callback-type)
   (declare (ignore callback-type))
   :pointer)
 ;; Lo mismo para las estructuras, callbacks, enums, ...
-
 
 (defun affi-to-cffi (type)
   (let ((expander (car (ensure-list type))))
@@ -25,15 +28,68 @@
         (exp:expand 'primitive-affi-types type)
         type)))
 
-(defmacro defctype (name (&rest args) &body body)
-  `(define-primitive-affi-type ,name (,@args)
-     (affi-to-cffi (progn ,@body))))
+(defun primitive-affi-type-p (type)
+  (exp:expansionp 'primitive-affi-types (car (ensure-list type))))
+
+(defun check-primitive-affi-type (type)
+  (unless (primitive-affi-type-p type)
+    (error "This is not a valid primitive affi type: ~s" type)))
+
+;; (defmacro defctype (name (&rest args) &body body)
+;;   `(define-primitive-affi-type ,name (,@args)
+;;      (affi-to-cffi (progn ,@body))))
 
 
-;; Las lentes permiten manipular varios elementos a la vez
+;; ----------------------------------------------------------------
 
-;; El usuario deberá definir 4 metodos para un tipo affi:
-;;  - Un constructor
-;;  - Un destructor
-;;  - Un getter
-;;  - Un setter
+
+(exp:defexpander affi-types)
+(exp:defexpander actual-affi-types)
+
+(defmacro define-affi-type (name (&rest args) actual-type &body body)
+  `(progn
+     (eval-when (:compile-toplevel :load-toplevel :execute)
+       (check-primitive-affi-type ,actual-type))
+     (exp:defexpansion actual-affi-types ,name ,args
+       ,actual-type)
+     (exp:defexpansion affi-types ,name ,args
+       ,@body)))
+
+(defun affi-type-p (type)
+  (exp:expansionp 'affi-types (car (ensure-list type))))
+
+(defun check-affi-type (type)
+  (unless (affi-type-p type)
+    (error "This is not a valid affi type: ~s" type)))
+
+
+(defgeneric expand-getter (slot obj-type)
+  (:documentation
+   "Must return a getter expression for a SLOT.")
+  (:method (obj-type slot &rest args)
+    (declare (ignore obj-type))
+    slot))
+
+(defgeneric expand-setter (slot value obj-type)
+  (:documentation
+   "Must return a setter expression for a SLOT.")
+  (:method (obj-type slot &rest args)
+    (declare (ignore obj-type))
+    `(setf ,slot ,value)))
+
+
+(defun expand-affi-getter (slot type)
+  (cond
+    ((primitive-affi-type-p type)
+      slot)
+    ((affi-type-p type)
+     (let ((obj-type (exp:expand 'affi-types type)))
+       (apply #'expand-getter slot obj-type)))))
+
+(defun expand-affi-setter (slot value type)
+  (cond
+    ((primitive-affi-type-p type)
+      `(setf ,slot ,value))
+    ((affi-type-p type)
+     (let ((obj-type (exp:expand 'affi-types type)))
+       (apply #'expand-setter slot value obj-type)))))
