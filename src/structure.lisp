@@ -3,6 +3,96 @@
 (in-readtable #:affinity)
 
 
+
+(defclass affinity-class (standard-class) ())
+
+(defmethod c2mop:validate-superclass ((class affinity-class) (super-class standard-class))
+  t)
+
+(defclass affinity-slot-definition ()
+  ((visibility :initarg :visibility :initform :public)
+   (ctype :initarg :ctype)))
+
+(defclass affinity-direct-slot-definition
+    (affinity-slot-definition c2mop:standard-direct-slot-definition)
+  ())
+
+(defclass affinity-effective-slot-definition
+    (affinity-slot-definition c2mop:standard-effective-slot-definition)
+  ())
+
+(defmethod c2mop:direct-slot-definition-class ((class affinity-class) &rest initargs)
+  (find-class 'affinity-direct-slot-definition))
+
+(defmethod c2mop:effective-slot-definition-class ((class affinity-class) &rest initargs)
+  (find-class 'affinity-effective-slot-definition))
+
+(defmethod c2mop:compute-effective-slot-definition ((class affinity-class) name direct-slots)
+  (let ((slot (call-next-method)))
+    (setf (slot-value slot 'visibility) (slot-value (car direct-slots) 'visibility)
+          (slot-value slot 'ctype) (parse-affi-type (slot-value (car direct-slots) 'ctype)))
+    slot))
+
+(defmethod c2mop:compute-slots ((class affinity-class))
+  (let ((slots (call-next-method))
+        (private-access-slot (make-instance 'c2cl:standard-effective-slot-definition
+                                            :name 'private-access-symbol
+                                            :initform (make-symbol "PRIVATE-ACCESS")
+                                            :initfunction (lambda () (make-symbol "PRIVATE-ACCESS")))))
+    (cons private-access-slot slots)))
+
+(defgeneric foreign-slot-value (object slot type)
+  (:documentation
+   "Returns the value of a slot."))
+
+(defmethod foreign-slot-value (object slot (object-type primitive-affi-type))
+  (slot-value object slot))
+
+(defgeneric (setf foreign-slot-value) (value object slot type)
+  (:documentation
+   "Sets the value of a slot."))
+
+(defmethod (setf foreign-slot-value) (value object slot (object-type primitive-affi-type))
+  (setf (slot-value object slot) value))
+
+(defmethod c2mop:slot-value-using-class ((class affinity-class) object
+                                         (slot affinity-effective-slot-definition))
+  (let ((private-access-symbol (slot-value object 'private-access-symbol))
+        (private-access-p (symbol-value private-access-symbol)))
+    (if private-access-p
+        (call-next-method)
+        (ecase (slot-value slot 'visibility)
+          (:public
+           (progv (list private-access-symbol) '(t)
+             (foreign-slot-value object (c2mop:slot-definition-name slot) (slot-value slot 'ctype))))
+          (:private
+           (error "The member ~s is private." (c2mop:slot-definition-name slot)))))))
+
+(defmethod (setf c2mop:slot-value-using-class) (new-value (class affinity-class) object
+                                                (slot affinity-effective-slot-definition))
+  (let ((private-access-symbol (slot-value object 'private-access-symbol))
+        (private-access-p (symbol-value private-access-symbol)))
+    (if private-access-p
+        (call-next-method)
+        (ecase (slot-value slot 'visibility)
+          (:public
+           (progv (list private-access-symbol) '(t)
+             (setf (foreign-slot-value object (c2mop:slot-definition-name slot) (slot-value slot 'ctype))
+                   new-value)))
+          (:private
+           (error "The member ~s is private." (c2mop:slot-definition-name slot)))))))
+
+;; (defclass prueba ()
+;;   ((x :initarg :x)
+;;    (y :visibility :private :hola 4 :initarg :y)
+;;    (z :visibility :public :initarg :z))
+;;   (:metaclass affinity-class))
+
+;; (defvar *mi-prueba* (make-instance 'prueba :x 1 :y 2 :z 3))
+
+
+
+
 (eval-when (:compile-toplevel :load-toplevel :execute)
 
   (defstruct slot-info

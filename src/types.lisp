@@ -5,14 +5,14 @@
 ;; Los tipos primitivos relacionan un tipo de affi con un tipo cffi.
 ;; Es una relacion 1 a 1. No se define ningun tipo de conversion.
 
-;; Por tanto:
-;; Los tipos primitivos devuelven:
-;;  - El tipo cffi que representan
 (exp:defexpander primitive-affi-types)
+
+(defclass primitive-affi-type ()
+  ((cffi-type :initarg :cffi-type)))
 
 (defmacro define-primitive-affi-type (name (&rest args) &body body)
   `(exp:defexpansion primitive-affi-types ,name ,args
-     ,@body))
+     (make-instance 'primitive-affi-type :cffi-type (progn ,@body))))
 
 (define-primitive-affi-type :pointer (inner-affi-type)
   `(pointer ,inner-affi-type))
@@ -22,12 +22,6 @@
   :pointer)
 ;; Lo mismo para las estructuras, callbacks, enums, ...
 
-(defun affi-to-cffi (type)
-  (let ((expander (car (ensure-list type))))
-    (if (exp:expansionp 'primitive-affi-types expander)
-        (exp:expand 'primitive-affi-types type)
-        type)))
-
 (defun primitive-affi-type-p (type)
   (exp:expansionp 'primitive-affi-types (car (ensure-list type))))
 
@@ -35,61 +29,64 @@
   (unless (primitive-affi-type-p type)
     (error "This is not a valid primitive affi type: ~s" type)))
 
-;; (defmacro defctype (name (&rest args) &body body)
-;;   `(define-primitive-affi-type ,name (,@args)
-;;      (affi-to-cffi (progn ,@body))))
+(defun parse-primitive-affi-type (type)
+  (check-primitive-affi-type type)
+  (exp:expand 'primitive-affi-types type))
 
+(defun primitive-affi-to-cffi (type)
+  (slot-value (parse-primitive-affi-type type) 'cffi-type))
 
 ;; ----------------------------------------------------------------
 
+(exp:defexpander user-affi-types)
 
-(exp:defexpander affi-types)
-(exp:defexpander actual-affi-types)
+(defclass user-affi-type ()
+  ((primitive-affi-type :initarg :primitive-affi-type)
+   (object-type :initarg :object-type)))
 
-(defmacro define-affi-type (name (&rest args) actual-type &body body)
-  `(progn
-     (eval-when (:compile-toplevel :load-toplevel :execute)
-       (check-primitive-affi-type ,actual-type))
-     (exp:defexpansion actual-affi-types ,name ,args
-       ,actual-type)
-     (exp:defexpansion affi-types ,name ,args
-       ,@body)))
+(defmacro define-affi-type (name (&rest args) &body body)
+  (assert (not (keywordp name)) "The name of an user affi type cannot be a keyword.")
+  (with-gensyms (objetc-type primitive-type)
+    `(exp:defexpansion user-affi-types ,name ,args
+       (multiple-value-bind (,object-type ,primitive-type) (progn ,@body)
+         (make-instance 'user-affi-type
+                        :primitive-affi-type ,primitive-type
+                        :object-type ,object-type)))))
+
+(defmacro defctype (name (&rest args) &body body)
+  (with-gensyms (actual-type-sym)
+    `(exp:defexpansion user-affi-types ,name ,args
+       (exp:expand affi-types (progn ,@body)))))
+
+(defun user-affi-type-p (type)
+  (exp:expansionp 'user-affi-types (car (ensure-list type))))
+
+(defun check-user-affi-type (type)
+  (unless (user-affi-type-p type)
+    (error "This is not a valid user affi type: ~s" type)))
+
+(defun parse-user-affi-type (type)
+  (check-user-affi-type type)
+  (slot-value (exp:expand 'user-affi-types type) 'object-type))
+
+(defun user-affi-to-primitive-affi (type)
+  (check-user-affi-type type)
+  (slot-value (exp:expand 'user-affi-types type) 'primitive-affi-type))
+
+;; --------------------------------------------------------------------------------
 
 (defun affi-type-p (type)
-  (exp:expansionp 'affi-types (car (ensure-list type))))
+  (or (primitive-affi-type-p type)
+      (user-affi-type-p type)))
 
 (defun check-affi-type (type)
   (unless (affi-type-p type)
     (error "This is not a valid affi type: ~s" type)))
 
-
-(defgeneric expand-getter (slot obj-type)
-  (:documentation
-   "Must return a getter expression for a SLOT.")
-  (:method (obj-type slot &rest args)
-    (declare (ignore obj-type))
-    slot))
-
-(defgeneric expand-setter (slot value obj-type)
-  (:documentation
-   "Must return a setter expression for a SLOT.")
-  (:method (obj-type slot &rest args)
-    (declare (ignore obj-type))
-    `(setf ,slot ,value)))
-
-
-(defun expand-affi-getter (slot type)
+(defun parse-affi-type (type)
   (cond
     ((primitive-affi-type-p type)
-      slot)
-    ((affi-type-p type)
-     (let ((obj-type (exp:expand 'affi-types type)))
-       (apply #'expand-getter slot obj-type)))))
-
-(defun expand-affi-setter (slot value type)
-  (cond
-    ((primitive-affi-type-p type)
-      `(setf ,slot ,value))
-    ((affi-type-p type)
-     (let ((obj-type (exp:expand 'affi-types type)))
-       (apply #'expand-setter slot value obj-type)))))
+     (parse-primitive-affi-type type))
+    ((user-affi-type-p type)
+     (parse-user-affi-type type))
+    (t (error "This is not a valid affi type: ~s" type))))
