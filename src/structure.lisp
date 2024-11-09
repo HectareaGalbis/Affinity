@@ -1,6 +1,6 @@
 
 (in-package #:affinity)
-(in-readtable #:affinity)
+(in-readtable affinity)
 
 
 
@@ -10,8 +10,7 @@
   t)
 
 (defclass affinity-slot-definition ()
-  ((visibility :initarg :visibility :initform :public)
-   (ctype :initarg :ctype)))
+  ((private :initarg :private :initform nil)))
 
 (defclass affinity-direct-slot-definition
     (affinity-slot-definition c2mop:standard-direct-slot-definition)
@@ -22,15 +21,16 @@
   ())
 
 (defmethod c2mop:direct-slot-definition-class ((class affinity-class) &rest initargs)
+  (declare (ignore initargs))
   (find-class 'affinity-direct-slot-definition))
 
 (defmethod c2mop:effective-slot-definition-class ((class affinity-class) &rest initargs)
+  (declare (ignore initargs))
   (find-class 'affinity-effective-slot-definition))
 
 (defmethod c2mop:compute-effective-slot-definition ((class affinity-class) name direct-slots)
   (let ((slot (call-next-method)))
-    (setf (slot-value slot 'visibility) (slot-value (car direct-slots) 'visibility)
-          (slot-value slot 'ctype) (parse-affi-type (slot-value (car direct-slots) 'ctype)))
+    (setf (slot-value slot 'private) (slot-value (car direct-slots) 'private))
     slot))
 
 (defmethod c2mop:compute-slots ((class affinity-class))
@@ -41,191 +41,170 @@
                                             :initfunction (lambda () (make-symbol "PRIVATE-ACCESS")))))
     (cons private-access-slot slots)))
 
-(defgeneric foreign-slot-value (object slot type)
+(defgeneric object-foreign-slot-value (object slot)
   (:documentation
-   "Returns the value of a slot."))
+   "Returns the value of a slot.")
+  (:method (object slot)
+    (slot-value object slot)))
 
-(defmethod foreign-slot-value (object slot (object-type primitive-affi-type))
-  (slot-value object slot))
-
-(defgeneric (setf foreign-slot-value) (value object slot type)
+(defgeneric (setf object-foreign-slot-value) (value object slot)
   (:documentation
-   "Sets the value of a slot."))
+   "Sets the value of a slot.")
+  (:method (value object slot)
+    (setf (slot-value object slot) value)))
 
-(defmethod (setf foreign-slot-value) (value object slot (object-type primitive-affi-type))
-  (setf (slot-value object slot) value))
+(defgeneric pointer-foreign-slot-value (ptr slot class-name)
+  (:documentation
+   "
+Same as foreign-slot-value but for pointers.
+The dispatch is done by class-name.
+")
+  (:method (ptr slot class-name)
+    (declare (ignore class-name))
+    (slot-value ptr slot)))
+
+(defgeneric (setf pointer-foreign-slot-value) (value ptr slot class-name)
+  (:documentation
+   "
+Same as (setf foreign-slot-value) but for pointers.
+The dispatch is done by class-name.
+")
+  (:method (value ptr slot class-name)
+    (declare (ignore class-name))
+    (setf (slot-value ptr slot) value)))
 
 (defmethod c2mop:slot-value-using-class ((class affinity-class) object
                                          (slot affinity-effective-slot-definition))
   (let ((private-access-symbol (slot-value object 'private-access-symbol))
         (private-access-p (symbol-value private-access-symbol)))
     (if private-access-p
-        (call-next-method)
-        (ecase (slot-value slot 'visibility)
-          (:public
-           (progv (list private-access-symbol) '(t)
-             (foreign-slot-value object (c2mop:slot-definition-name slot) (slot-value slot 'ctype))))
-          (:private
-           (error "The member ~s is private." (c2mop:slot-definition-name slot)))))))
+        (object-foreign-slot-value object (c2mop:slot-definition-name slot))
+        (if (slot-value slot 'private)
+            (error "The member ~s is private." (c2mop:slot-definition-name slot))
+            (progv (list private-access-symbol) '(t)
+              (slot-value object (c2mop:slot-definition-name slot)))))))
 
 (defmethod (setf c2mop:slot-value-using-class) (new-value (class affinity-class) object
                                                 (slot affinity-effective-slot-definition))
   (let ((private-access-symbol (slot-value object 'private-access-symbol))
         (private-access-p (symbol-value private-access-symbol)))
     (if private-access-p
-        (call-next-method)
-        (ecase (slot-value slot 'visibility)
-          (:public
-           (progv (list private-access-symbol) '(t)
-             (setf (foreign-slot-value object (c2mop:slot-definition-name slot) (slot-value slot 'ctype))
-                   new-value)))
-          (:private
-           (error "The member ~s is private." (c2mop:slot-definition-name slot)))))))
+        (setf (object-foreign-slot-value object (c2mop:slot-definition-name slot)) new-value)
+        (if (slot-value slot 'private)
+            (error "The member ~s is private." (c2mop:slot-definition-name slot))
+            (progv (list private-access-symbol) '(t)
+              (setf (slot-value object (c2mop:slot-definition-name slot)) new-value))))))
 
-;; (defclass prueba ()
-;;   ((x :initarg :x)
-;;    (y :visibility :private :hola 4 :initarg :y)
-;;    (z :visibility :public :initarg :z))
-;;   (:metaclass affinity-class))
-
-;; (defvar *mi-prueba* (make-instance 'prueba :x 1 :y 2 :z 3))
-
-
-
+(defun public-slot-name-p (class slot-name)
+  (let ((effective-slot (find slot-name (c2mop:class-slots class) :key #'c2mop:slot-definition-name)))
+    (and effective-slot
+         (not (slot-value effective-slot 'private)))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-
-  (defstruct slot-info
-    name
-    type
-    lens
-    visible)
-
-  (defun process-slot (slot)
-    (let ((name (car slot))
-          (type (cadr slot))
-          (lens (getf (cddr slot) :lens))
-          (visible (getf (cddr slot)) :visible))
-      (make-slot-info :name name :type type :lens lens :visible visible)))
   
-  (defun process-slots (slots)
-    (mapcar #'process-slot slots))
+  (defun make-defclass (class-name slots)
+    `(defclass ,class-name ()
+       (,@(loop for slot in slots
+                collect `(,(slot-name slot) :private ,(slot-private slot))))
+       (:metaclass affinity-class)))
 
-  (defun make-c-slot (slot-info)
-    (with-slots (name type) c-slot
-      `(,name ,(affi-to-cffi type))))
+  (defun make-defcstruct (class-name class-type slots)
+    (let ((foreign-slots (loop for slot in slots
+                               if (slot-foreign-p slot)
+                                 collect `(,(slot-name slot) ,(slot-cffi-type slot)))))
+      `(cffi:defcstruct (,class-name :class ,class-type)
+         ,@foreign-slots)))
+
+  (defun make-object-accessor-context (object-sym foreign-public-names body)
+    `(with-slots ,foreign-public-names ,object-sym
+       ,body))
+
+  (defun make-pointer-accessor-context (ptr-sym foreign-public-names body)
+    (with-gensyms (cpointer-sym type-sym)
+      `(with-slots ((,cpointer-sym cpointer) (,type-sym ctype)) ,ptr-sym
+         (symbol-macrolet (,@(loop for foreign-public-name in foreign-public-names
+                                   collect `(,foreign-public-name
+                                             (cffi:foreign-slot-value ,ptr-sym ,type-sym
+                                                                      ',foreign-public-name))))
+           ,body))))
   
-  (defun make-c-slots (slot-infos)
-    (loop for slot-info in slot-infos
-          collect (make-c-slot slot-info)))
+  (defun make-accessors (class-name slots)
+    (let* ((foreign-public-slots (remove-if-not #'slot-public-p slots))
+           (foreign-public-names (mapcar #'slot-name foreign-public-slots)))
+      (with-gensyms (object-sym slot-sym value-sym class-name-sym)
+        (loop for slot in foreign-public-slots
+              if (user-affi-type-p (slot-affi-type slot))
+                collect `(defmethod object-foreign-slot-value
+                             ((,object-sym ,class-name)
+                              (,slot-sym (eql ',(slot-name slot))))
+                           ,(make-object-accessor-context
+                             object-sym
+                             foreign-public-names
+                             (expand-getter slot-sym (parse-affi-type (slot-affi-type slot)))))
+                and collect `(defmethod (setf object-foreign-slot-value)
+                                 (,value-sym 
+                                  (,object-sym ,class-name)
+                                  (,slot-sym (eql ',(slot-name slot))))
+                               ,(make-object-accessor-context
+                                 object-sym
+                                 foreign-public-names
+                                 (expand-setter value-sym slot-sym (parse-affi-type (slot-affi-type slot)))))
+                and collect `(defmethod pointer-foreign-slot-value
+                                 (,object-sym
+                                  (,slot-sym (eql ',(slot-name slot)))
+                                  (,class-name-sym ,class-name))
+                               ,(make-pointer-accessor-context
+                                 object-sym
+                                 foreign-public-names
+                                 (expand-getter slot-sym (parse-affi-type (slot-affi-type slot)))))
+                and collect `(defmethod (setf pointer-foreign-slot-value)
+                                 (,value-sym
+                                  ,object-sym
+                                  (,slot-sym (eql ',(slot-name slot)))
+                                  (,class-name-sym ,class-name))
+                               ,(make-pointer-accessor-context
+                                 object-sym
+                                 foreign-public-names
+                                 (expand-setter value-sym slot-sym (parse-affi-type (slot-affi-type slot)))))))))
 
-  (defun make-defcstruct (name class-name slot-infos)
-    `(cffi:defcstruct (,name :class ,class-name)
-       ,@(make-c-slots slot-infos)))
+  (defun make-translators (class-name class-type)
+    (with-gensyms (ptr-sym type-sym value-sym)
+      (list
 
-  (defun make-struct-slot (slot-info)
-    (slot-value slot-info 'name))
-  
-  (defun make-struct-slots (slot-infos)
-    (loop for slot-info in slot-infos
-          if (slot-value slot-info 'visible)
-            collect (make-struct-slot slot-info)))
+       `(defmethod cffi:translate-from-foreign (,ptr-sym (,type-sym ,class-type))
+          (cstruct-from-cffi-memory ',class-name ,ptr-sym))
 
-  (defun make-defstruct (name slot-infos)
-    `(defstruct ,name
-       ,@(make-struct-slots slot-infos)))
+       `(defmethod cffi:translate-into-foreign-memory (,value-sym (,type-sym ,class-type) ,ptr-sym)
+          (cstruct-into-cffi-memory ,value-sym ,ptr-sym))
 
-  (defun make-pointer-getter (class-name slot-info)
-    (with-slots (name lens) slot-info
-      (let ((getter-name (symbolicate class-name "-" name)))
-        (with-gensyms (ptr name-sym slot-sym)
-          (let ((getter-body (if lens
-                                 (exp:expand 'lens-getter `(,(car lens) ',name ,@(cdr lens)))
-                                 `(foreign-slot-value ,ptr ',name))))
-            `(defmethod get-structure-value (,ptr (,name-sym (eql ',class-name)) (,slot-sym (eql ',name)))
-               (declare (ignore ,name-sym ,slot-sym))
-               ,getter-body))))))
+       `(defmethod cffi::translate-aggregate-to-foreign (,ptr-sym ,value-sym (,type-sym ,class-type))
+          (cffi:translate-into-foreign-memory ,value-sym ,type-sym ,ptr-sym))))))
 
-  (defun make-pointer-getters (class-name slot-infos)
-    (loop for slot-info in slot-infos
-          if (slot-value slot-info 'visible)
-            collect (make-pointer-getter class-name slot-info)))
+(defmacro defcstruct (class-name &body object-slots)
+  (check-type class-name symbol)
+  (let ((slots (mapcar #¿(parse-slot ?) object-slots)))
+    (with-gensyms (class-type)
+      `(progn
+         ,(make-defclass class-name slots)
+         ,(make-defcstruct class-name class-type slots)
+         ,@(make-accessors class-name slots)
+         ,@(make-translators class-name class-type)))))
 
-  (defun make-pointer-setter (class-name slot-info)
-    (with-slots (name lens) slot-info
-      (let ((getter-name (symbolicate class-name "-" name)))
-        (with-gensyms (new-value ptr)
-          (let ((setter-body (if lens
-                                 (exp:expand 'lens-setter `(,(car lens) ',name ,@(cdr lens)))
-                                 `(setf (foreign-slot-value ,ptr ',name) ,new-value))))
-            `(defmethod (setf get-structure-value) (,new-value ,ptr (,name-sym (eql ',class-name)) (,slot-sym (eql ',name)))
-               (declare (ignore ,name-sym ,slot-sym))
-               ,setter-body))))))
 
-  (defun make-pointer-setters (class-name slot-infos)
-    (loop for slot-info in slot-infos
-          if (slot-value slot-info 'visible)
-            collect (make-pointer-setter class-name slot-info)))
+(defun cstruct-into-cffi-memory (cstruct ptr)
+  (let* ((struct-class (class-of cstruct))
+         (struct-name (class-name struct-class))
+         (affi-ptr (make-instance 'pointer :cpointer ptr :ctype `(:struct ,struct-name))))
+    (loop for slot in (c2mop:class-slots struct-class)
+          for slot-name = (c2mop:slot-definition-name slot)
+          if (not (slot-value slot 'private))
+            do (setf (slot-value affi-ptr slot-name) (slot-value cstruct slot-name)))))
 
-  (defun make-from-foreign-setters (object-sym pointer-sym slot-infos)
-    (loop for slot-info in slot-infos
-          if (slot-value slot-info 'visible)
-            collect (with-slots (name) slot-info
-                      `((slot-value ,object-sym ',name)
-                        (slot-value ,pointer-sym ',name)))))
-  
-  (defun make-translate-from-foreign (name class-name slot-infos)
-    (with-gensyms (ptr-sym type-sym object-sym)
-      `(defmethod translate-from-foreign (,ptr-sym (,type-sym ,class-name))
-         (let ((,object-sym (make-instance ',name))
-               (,pointer-sym (make-instance 'pointer
-                                            :cpointer ,ptr-sym
-                                            :ctype '(:struct ,name))))
-           (setf ,@(make-from-foreign-setters object-sym pointer-sym slot-infos))))))
-
-  (defun make-into-foreign-setters (object-sym pointer-sym slot-infos)
-    (loop for slot-info in slot-infos
-          if (slot-value slot-info 'visible)
-            collect (with-slots (name) slot-info
-                      `((slot-value ,pointer-sym ',name)
-                        (slot-value ,object-sym ',name)))))
-  
-  (defun make-translate-into-foreign (name class-name slot-infos)
-    (with-gensyms (type-sym ptr-sym object-sym)
-      `(defmethod translate-into-foreign-memory ((,object-sym ,name) (,type-sym ,class-name) ,ptr-sym)
-         (let ((,pointer-sym (make-instance 'pointer
-                                            :cpointer ,ptr-sym
-                                            :ctype '(:struct ,name))))
-           (setf ,@(make-into-foreign-setters object-sym pointer-sym slot-infos))))))
-
-  (defun make-translate-pointer-into-foreign (name class-name slot-infos)
-    (with-gensyms (type-sym ptr-sym object-sym i-sym obj-ptr-sym)
-      `(defmethod translate-into-foreign-memory ((,object-sym pointer) (,type-sym ,class-name) ,ptr-sym)
-         (with-slots ((,obj-ptr-sym cpointer)) ,object-sym
-             (loop for ,i-sym from 0 below (cffi:foreign-type-size '(:struct ,name))
-                   do (setf (cffi:mem-aref ,ptr-sym :char ,i-sym) (cffi:mem-aref ,obj-ptr-sym :char ,i-sym)))))))
-
-  (defun make-translate-into-foreign-pointer (name slot-infos)
-    (with-gensyms (object-sym type-sym pointer-sym)
-      `(defmethod cffi:translate-to-foreign ((,object-sym ,name) (,type-sym pointer))
-         (let ((,pointer-sym (foreign-alloc '(:struct ,name))))
-           (setf ,@(make-into-foreign-setter object-sym pointer-sym slot-infos))))))
-
-  (defun make-translate-aggregate-to-foreign (class-name)
-    (with-gensyms (pointer-sym object-sym type-sym)
-      `(defmethod cffi::translate-aggregate-to-foreign (,pointer-sym ,object-sym (,type-sym ,class-name))
-         (cffi:translate-into-foreign-memory ,object-sym ,type-sym ,pointer-sym)))))
-
-(defmacro defcstruct (name slots)
-  (let ((slot-infos (process-slots slots))
-        (class-name (gensym "CLASS-NAME")))
-    `(progn
-       ,(make-defcstruct name class-name slot-infos)
-       ,(make-defstruct name slot-infos)
-       ,@(make-pointer-getters name slot-infos)
-       ,@(make-pointer-setters name slot-infos)
-       ,(make-translate-from-foreign name class-name slot-infos)
-       ,(make-translate-info-foreign name class-name slot-infos)
-       ,(make-translate-pointer-into-foreign name class-name slot-infos)
-       ,(make-translate-into-foreign-pointer name slot-infos)
-       ,(make-translate-aggregate-to-foreign class-name))))
+(defun cstruct-from-cffi-memory (struct-name ptr)
+  (let* ((cstruct (make-instance struct-name))
+         (struct-class (class-of cstruct))
+         (affi-ptr (make-instance 'pointer :cpointer ptr :ctype `(:struct ,struct-name))))
+    (loop for slot in (c2mop:class-slots struct-class)
+          for slot-name = (c2mop:slot-definition-name slot)
+          if (not (slot-value slot 'private))
+            do (setf (slot-value cstruct slot-name) (slot-value affi-ptr slot-name)))))

@@ -13,7 +13,8 @@
   ((cpointer :initarg :cpointer)
    (ctype :initarg :ctype)
    (subpointers :initarg :subpointers
-                :initform nil)))
+                :initform nil)
+   (private-access-symbol :initform (make-symbol "PRIVATE-ACCESS"))))
 
 (defmethod cffi:translate-to-foreign ((object pointer) (obj-type pointer-type))
   (declare (ignore obj-type))
@@ -35,27 +36,38 @@
 
 
 (defmethod slot-missing (class (obj pointer) slot-name (op (eql 'slot-value)) &optional new-value)
+  (declare (ignore new-value))
   (with ((ctype (slots obj)))
     (unless (eq (car ctype) :struct)
       (error "This pointer does not point to a structure."))
-    (get-structure-value obj (cadr ctype) slot-name)))
+    (with-slots (private-access-symbol) obj
+      (let ((private-access-p (symbol-value private-access-symbol)))
+        (if private-access-p
+            (pointer-foreign-slot-value obj slot-name (cadr ctype))
+            (if (public-slot-name-p class slot-name)
+                (progv (list private-access-symbol) '(t)
+                  (slot-value obj slot-name))
+                (error "The member ~s is private." slot-name)))))))
 
 (defmethod slot-missing (class (obj pointer) slot-name (op (eql 'setf)) &optional new-value)
   (with ((ctype (slots obj)))
     (unless (eq (car ctype) :struct)
       (error "This pointer does not point to a structure."))
-    (setf (get-structure-value obj (cadr ctype) slot-name))))
-
-;; TODO: Use get-structure-slot-names from structure.lisp
+    (with-slots (private-access-symbol) obj
+      (let ((private-access-p (symbol-value private-access-symbol)))
+        (if private-access-p
+            (with-slots (cpointer ctype) obj
+              (setf (pointer-foreign-slot-value obj slot-name (cadr ctype)) new-value))
+            (if (public-slot-name-p class slot-name)
+                (progv (list private-access-symbol) '(t)
+                  (setf (slot-value obj slot-name) new-value))
+                (error "The member ~s is private." slot-name)))))))
 
 ;; (defmethod slot-missing (class (obj pointer) slot-name (op (eql 'slot-boundp)) &optional new-value)
-;;   (member slot-name (cffi:foreign-slot-names ctype)))
+;;   )
 
 ;; (defmethod slot-missing (class (obj pointer) slot-name (op (eql 'slot-makunbound)) &optional new-value)
-;;   (with ((ctype (slots obj)))
-;;     (if (member slot-name (cffi:foreign-slot-names ctype))
-;;         (error "The slot ~s cannot be unbound." slot-name)
-;;         (call-next-method))))
+;;   )
 
 
 
@@ -70,15 +82,19 @@
   (with ((cpointer (slots ptr)))
     (cffi:foreign-free cpointer)))
 
-(defun foreign-alloc (ctype &rest args &key initial-element initial-contents (count 1) null-terminated-p)
-  (let* ((cpointer (apply #'cffi:foreign-alloc ctype args))
+(defun foreign-alloc (ctype &key initial-element initial-contents (count 1) null-terminated-p)
+  (let* ((cpointer (funcall #'cffi:foreign-alloc ctype
+                            :initial-element initial-element
+                            :initial-contents initial-contents
+                            :count count
+                            :null-terminated-p null-terminated-p))
          (pointer-instance (make-instance 'pointer
                                           :cpointer cpointer
                                           :ctype ctype)))
     (values pointer-instance)))
 
-(defun foreign-symbol-pointer (foreign-name ctype &rest args &key library)
-  (let ((cpointer (apply #'cffi:foreign-symbol-pointer foreign-name args)))
+(defun foreign-symbol-pointer (foreign-name ctype &key library)
+  (let ((cpointer (funcall #'cffi:foreign-symbol-pointer foreign-name :library library)))
     (and cpointer
          (make-instance 'pointer :cpointer cpointer :ctype ctype))))
 

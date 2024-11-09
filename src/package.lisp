@@ -7,4 +7,7 @@
                 #:define-foreign-library
                 #:use-foreign-library)
   (:export #:define-foreign-library
-           #:use-foreign-library))
+           #:use-foreign-library
+           #:defctype
+           #:defcfun
+           #:defcstruct))

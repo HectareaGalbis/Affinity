@@ -11,7 +11,11 @@
                (:module "src"
                 :serial t
                 :components ((:file "types")
-                             (:file "callback")))))
+                             (:file "slots")
+                             (:file "functions")
+                             (:file "pointer")
+                             (:file "structure")
+                             ))))
 
 
 ;; (asdf:defsystem "affinity/doc"
