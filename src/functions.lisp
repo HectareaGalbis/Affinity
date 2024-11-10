@@ -1,5 +1,6 @@
 
 (in-package #:affinity)
+(in-readtable affinity)
 
 
 (defmacro defcfun ((name foreign-name) return-type (&rest arg-slots) &optional docstring)
