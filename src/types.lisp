@@ -1,5 +1,6 @@
 
 (in-package #:affinity)
+(in-readtable affinity)
 
 ;; Primitive types
 ;; Los tipos primitivos relacionan un tipo de affi con un tipo cffi.
