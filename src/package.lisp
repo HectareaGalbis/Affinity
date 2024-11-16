@@ -10,4 +10,7 @@
            #:use-foreign-library
            #:defctype
            #:defcfun
-           #:defcstruct))
+           #:define-c-function
+           #:defcstruct
+           #:foreign-alloc
+           #:mem-ref))

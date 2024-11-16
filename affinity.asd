@@ -15,7 +15,7 @@
                              (:file "functions")
                              (:file "pointer")
                              (:file "structure")
-                             ))))
+                             (:file "string")))))
 
 
 ;; (asdf:defsystem "affinity/doc"

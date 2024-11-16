@@ -105,7 +105,8 @@ The dispatch is done by class-name.
   (defun make-defclass (class-name slots)
     `(defclass ,class-name ()
        (,@(loop for slot in slots
-                collect `(,(slot-name slot) :private ,(slot-private slot))))
+                collect `(,(slot-name slot) :private ,(slot-private slot)
+                                            :initform ,(slot-init slot))))
        (:metaclass affinity-class)))
 
   (defun make-defcstruct (class-name class-type slots)

@@ -3,41 +3,55 @@
 (in-readtable affinity)
 
 
-(defmacro defcfun ((name foreign-name) return-type (&rest arg-slots) &optional docstring)
-  (let* ((slots (mapcar #'parse-slot arg-slots))
-         (public-slots (remove-if-not #'slot-public-p slots))
-         (foreign-slots (remove-if-not #'slot-foreign-p slots))
-         ;; (public-names (mapcar #¿(slot-name ?) public-slots))
-         (foreign-names (mapcar #¿(slot-name ?) foreign-slots))
-         (arg-names (mapcar #¿(make-symbol (symbol-name (slot-name ?))) public-slots)))
-    (flet ((make-result-forms (foreign-funcall)
-             (if (equal (canonicalize return-type) '(:void))
-                 `(,foreign-funcall (values))
-                 (with-gensyms (result-sym)
-                   `((let ((,result-sym ,foreign-funcall))
-                       ,(expand-getter result-sym (parse-affi-type return-type))))))))
-      `(defun ,name ,arg-names
-         ,@(when docstring
-             `(,docstring))
-         ,@(if foreign-names
-               `((let ,foreign-names
-                   (declare (ignorable ,@foreign-names))
-                   ,@(mapcar #¿(slot-expand-setter ? ?) arg-names public-slots)
-                   ,@(make-result-forms `(cffi:foreign-funcall
-                                          ,foreign-name
-                                          ,@(mapcan #¿(list (slot-cffi-type ?) ?)
-                                                      foreign-slots foreign-names)
-                                          ,(affi-to-cffi return-type)))))
-               (make-result-forms `(cffi:foreign-funcall
-                                    ,foreign-name
-                                    ,(affi-to-cffi return-type))))))))
+(eval-when (:compile-toplevel :load-toplevel :execute)
 
-(defmacro define-c-function ((name foreign-name) return-slot (&rest arg-slots) &body body)
-  (let ((return-slot-object (parse-slot return-slot))
-        (public-names (mapcar #¿(slot-name ?) (remove-if-not #'slot-public-p arg-slots))))
-    (with-gensyms (func-sym)
-      `(progn
-         (defcfun (,func-sym ,foreign-name) ,(slot-affi-type resturn-slot-object) ,@arg-slots)
-         (defun ,name ,public-names
-           (let ((,(slot-name return-slot-object) (,func-sym ,@public-names)))
-             ,@body))))))
+  (defun split-docstring-body (body)
+    (if (stringp (car body))
+        (values (car body) (cdr body))
+        (values nil body)))
+
+  (defun make-bindings (foreign-slots)
+    (mapcar #¿`(,(slot-name ?slot) ,(slot-init ?slot)) foreign-slots))
+
+  (defun make-setters (arg-names public-slots)
+    (mapcar #¿(slot-expand-setter ? ?) arg-names public-slots))
+  
+  (defun make-foreign-funcall (foreign-name foreign-slots return-slot)
+    `(cffi:foreign-funcall
+      ,foreign-name
+      ,@(mapcan #¿(list (slot-cffi-type ?slot) (slot-name ?slot)) foreign-slots)
+      ,(slot-cffi-type return-slot)))
+
+  (defun make-result-form (return-slot foreign-funcall body)
+    (let ((return-name (slot-name return-slot))
+          (return-type (slot-affi-type return-slot)))
+      (with-gensyms (result-sym)
+        `(let* ((,result-sym ,foreign-funcall)
+                (,return-name ,(expand-getter result-sym (parse-affi-type return-type))))
+           (declare (ignorable ,return-name))
+           ,@body)))))
+
+(defmacro define-c-function ((name foreign-name) return-form (&rest args) &body docstring-body)
+  (let* ((return-slot (parse-slot return-form))
+         (arg-slots (mapcar #¿(parse-slot ?) args))
+         (public-slots (remove-if-not #'slot-public-p arg-slots))
+         (foreign-slots (remove-if-not #'slot-foreign-p arg-slots))
+         (arg-names (mapcar #¿(make-symbol (symbol-name (slot-name ?))) public-slots)))
+    (multiple-value-bind (docstring body) (split-docstring-body docstring-body)
+      (let* ((foreign-funcall (make-foreign-funcall foreign-name foreign-slots return-slot))
+             (result-form (make-result-form return-slot foreign-funcall body)))
+        `(defun ,name ,arg-names
+           ,@(when docstring `(,docstring))
+           (let ,(make-bindings foreign-slots)
+             ,@(make-setters arg-names public-slots)
+             ,result-form))))))
+
+(defmacro defcfun ((name foreign-name) return-type (&rest arg-slots) &optional docstring)
+  (with-gensyms (return-sym)
+    `(define-c-function (,name ,foreign-name) (,return-sym ,return-type) ,arg-slots
+       ,@(when docstring `(,docstring))
+       ,(if (equal (canonicalize-affi-type return-type) '(:void))
+            '(values)
+            return-sym))))
+
+

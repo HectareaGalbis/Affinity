@@ -9,11 +9,11 @@
     ((name :initarg :name :reader slot-name)
      (affi-type :initarg :affi-type :reader slot-affi-type)
      (cffi-type :initarg :cffi-type :reader slot-cffi-type)
-     (private :initarg :private
-              :initform nil
-              :reader slot-private)))
+     (init :initarg :init :reader slot-init)
+     (private :initarg :private :reader slot-private
+              :initform nil)))
 
-  (defvar *options* '(:private))
+  (defvar *options* '(:init :private))
   
   (defun check-slot-syntax (slot)
     (check-type slot list)
@@ -52,4 +52,4 @@
 
   (defun slot-expand-setter (new-value slot)
     (with-slots (name affi-type) slot
-      (expand-setter new-value name affi-type))))
+      (expand-setter new-value name (parse-affi-type affi-type)))))
