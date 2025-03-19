@@ -209,3 +209,6 @@ The dispatch is done by class-name.
           for slot-name = (c2mop:slot-definition-name slot)
           if (not (slot-value slot 'private))
             do (setf (slot-value cstruct slot-name) (slot-value affi-ptr slot-name)))))
+
+(define-primitive-affi-type :struct (name)
+  `(:struct ,name))

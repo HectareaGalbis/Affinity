@@ -30,6 +30,8 @@
                             (canonicalize-affi-type type))))
       (format nil "~s~@[ [aka: ~s]~]" type actual-type))))
 
+;; --------------------------------------------------------------------------------
+
 ;; Primitive types
 ;; Los tipos primitivos relacionan un tipo de affi con un tipo cffi.
 ;; Es una relacion 1 a 1. No se define ningun tipo de conversion.
@@ -45,36 +47,6 @@
        (let ((cffi-type (destructuring-bind ,args ,args-sym
                           ,@body)))
          (make-instance 'primitive-affi-type :cffi-type cffi-type)))))
-
-(defmacro define-basic-primitive-types (&rest types)
-  `(progn
-     ,@(mapcar #¿`(define-primitive-affi-type ,?type () ,?type) types)))
-
-(define-basic-primitive-types
-    :char :unsigned-char :short :unsigned-short :int :unsigned-int :long :unsigned-long :long-long
-  :unsigned-long-long :uchar :ushort :uint :ulong :llong :ullong :int8 :uint8 :int16 :uint16 :int32 :uint32
-  :int64 :uint64 :size :ssize :intptr :uintptr :ptrdiff :offset :float :double :long-double :void)
-
-(define-primitive-affi-type :bool (&optional (base-type :int))
-  `(:boolean ,(affi-to-cffi base-type)))
-
-(define-primitive-affi-type :pointer (inner-affi-type)
-  `(pointer ,inner-affi-type))
-
-(define-primitive-affi-type :struct (name)
-  `(:struct ,name))
-
-(define-primitive-affi-type :string-ptr (&optional (encoding :utf-8))
-  `(string-ptr encoding))
-
-(define-primitive-affi-type :string-array (size &optional (encoding :utf-8))
-  `(string-array size encoding))
-
-(define-primitive-affi-type :callback (callback-type)
-  (declare (ignore callback-type))
-  :pointer)
-;; Lo mismo para las estructuras, callbacks, enums, ...
-
 
 (defun primitive-affi-type-p (type)
   (exp:expansionp 'primitive-affi-types (affi-type-name type)))
@@ -92,6 +64,11 @@
 
 ;; ----------------------------------------------------------------
 
+;; User affi types
+;; Los tipos de usuario son como los tipos en cffi.
+;; El usuario debe crear una clase cualquiera que representa un tipo de dato.
+;; Los metodos para realizar las transformaciones se deben especializar usando esta clase.
+
 (exp:defexpander user-affi-types)
 
 (defclass user-affi-type ()
@@ -99,6 +76,11 @@
    (object-type :initarg :object-type)))
 
 (defmacro define-affi-type (name (&rest args) &body body)
+  "Defines an user type.
+
+This macro must return two objects:
+  1. The primitive object this type is based on.
+  2. An object that represents the type."
   (assert (not (keywordp name)) (name) "The name of an user affi type cannot be a keyword.")
   (with-gensyms (object-type primitive-type)
     `(exp:defexpansion user-affi-types ,name ,args
@@ -132,6 +114,10 @@
   (primitive-affi-to-cffi primitive-affi))
 
 ;; --------------------------------------------------------------------------------
+
+;; Tipos affi
+;; Los tipos affi agrupan el resto de tipos.
+;; Es decir, un tipo affi puede ser un tipo primitivo o un tipo creado por el usuario.
 
 (defun affi-type-p (type)
   (or (primitive-affi-type-p type)

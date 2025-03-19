@@ -22,6 +22,8 @@
 (defmethod cffi:translate-from-foreign (pointer (obj-type string-ptr-type))
   (cffi:foreign-string-to-lisp pointer :encoding (slot-value obj-type 'encoding)))
 
+(define-primitive-affi-type :string-ptr (&optional (encoding :utf-8))
+  `(string-ptr encoding))
 
 ;; string-array
 (cffi:define-foreign-type string-array-type ()
@@ -43,3 +45,6 @@
 
 (defmethod cffi::translate-aggregate-to-foreign (pointer (str string) (obj-type string-array-type))
   (cffi:translate-into-foreign-memory str obj-type pointer))
+
+(define-primitive-affi-type :string-array (size &optional (encoding :utf-8))
+  `(string-array size encoding))

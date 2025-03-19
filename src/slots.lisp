@@ -52,4 +52,8 @@
 
   (defun slot-expand-setter (new-value slot)
     (with-slots (name affi-type) slot
-      (expand-setter new-value name (parse-affi-type affi-type)))))
+      (expand-setter new-value name (parse-affi-type affi-type))))
+
+
+  (defun public-to-foreign-bindings (slots)
+    ))

@@ -229,3 +229,7 @@
 (defwith foreign-slots (vars (ptr) &body body)
   `(with-foreign-slots ,vars (,ptr)
      ,@body))
+
+
+(define-primitive-affi-type :pointer (inner-affi-type)
+  `(pointer ,inner-affi-type))

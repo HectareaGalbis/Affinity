@@ -3,6 +3,55 @@
 (in-named-readtable affinity)
 
 
+(defclass callback ()
+  ((arg-types :initarg :arg-types)
+   (ret-type :init-arg :ret-type)
+   (ptr :init-arg :ptr))
+  (:metaclass c2mop:funcallable-standard-class))
+
+
+(defmethod initialize-instance :after ((c callback) &key)
+  (with-slots (arg-types ret-type ptr) c
+    (c2mop:set-funcallable-instance-function c (lambda (&rest args)
+                                                 (let ((foreign-args (mapcan #'list arg-types args)))
+                                                   (apply cffi:foreign-funcall-pointer
+                                                          (append foreign-args (list ptr))))))))
+
+
+
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+
+  (defun make-callback-class (name slots)
+    (with-gensyms (ptr)
+      (list
+
+       `(defclass ,name ()
+          ((,ptr :initarg :ptr))
+          (:metaclass c2mop:funcallable-standard-class))
+
+       (with-gensyms (c args)
+         `(defmethod initialize-instance ((,c ,name) &key)
+            (with-slots (,ptr) ,c
+              (c2mop:set-funcallable-instance-function
+               ,c (lambda (&rest ,args)
+                    )))))))))
+
+(defmacro define-callback-definer (name ret-type (&rest arg-slots) &optional docstring)
+  )
+
+
+
+
+
+
+
+
+
+
+
+
+
 (exp:defexpander callback-expander)
 
 
