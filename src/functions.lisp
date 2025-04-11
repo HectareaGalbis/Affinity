@@ -9,30 +9,10 @@
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 (cffi:define-foreign-type function-type ()
   ((name :initarg :name)))
 
-(cffi:define-parse-method function (name)
+(cffi:define-parse-method function-instance (name)
   (make-instance 'function-type :name name :actual-type :pointer))
 
 (defclass function-obj ()
@@ -87,12 +67,6 @@
               ,result-form)))))))
 
 
-
-(defmacro define-function-type (name return-form &rest args)
-  )
-
-
-
 (defmacro define-c-function ((name foreign-name) return-form (&rest args) &body body)
   `(progn
      (when (symbol-function ',name)
@@ -110,3 +84,60 @@
             return-sym))))
 
 
+
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+
+  (defun defcallback-function-form (name args body)
+    `(defun ,name ,args
+       ,@body))
+
+  (defun defcallback-bindings (arg-names public-slots)
+    (let ((getters (mapcar #¿(slot-expand-getter ?) public-slots)))
+      (mapcar #¿(list ? ?) arg-names getters)))
+  
+  (defun defcallback-callback (name function-name return-type foreign-slots public-slots)
+    (let* ((foreign-args (mapcar #¿(list (slot-name ?slot)
+                                         (slot-cffi-type ?slot))
+                                   foreign-slots))
+           (public-args (mapcar #¿(make-symbol (symbol-name (slot-name ?))) public-slots)))
+      `(cffi:defcallback ,name ,(affi-to-cffi return-type) ,foreign-args
+         (let ,(defcallback-bindings public-args public-slots)
+           (,function-name ,@public-args))))))
+
+(defmacro defcallback (name return-type (&rest args) &body body)
+  (let* ((arg-slots (mapcar #¿(parse-slot ?) args))
+         (public-slots (remove-if-not #'slot-public-p arg-slots))
+         (foreign-slots (remove-if-not #'slot-foreign-p arg-slots))
+         (arg-names (mapcar #¿(slot-name ?) public-slots)))
+    (with-gensyms (func-name callback-name)
+      `(progn
+         ,(defcallback-function-form func-name arg-names body)
+         ,(defcallback-callback callback-name func-name return-type foreign-slots public-slots)
+         (when (symbol-function ',name)
+           (warn "affi:define-c-function : Redefining %s" ',name))
+         (setf (symbol-function ',name) (make-instance 'function-obj :function-ref ',callback-name))
+         (c2mop:set-funcallable-instance-function #',name #',func-name)))))
+
+(defmacro define-callback-definer (name return-type (&rest args))
+  (check-type name symbol)
+  (check-affi-type return-type)
+  (mapcar #'check-slot-syntax args)
+  (let* ((arg-slots (mapcar #¿(parse-slot ?) args))
+         (public-slots (remove-if-not #'slot-public-p arg-slots))
+         (arg-names (mapcar #¿(make-symbol (symbol-name (slot-name ?))) public-slots)))
+    (with-gensyms (func-name callback-name body)
+      `(defmacro ,name (,callback-name ,arg-names &body ,body)
+         (check-type ,callback-name symbol)
+         (mapcar #¿(check-type ? symbol) ',arg-names)
+         `(progn
+            (defun ,',func-name ,(list ,@arg-names)
+              ,@,body)
+            (defcallback ,,callback-name ,',return-type ,',args
+              (,',func-name ,@(mapcar #¿(car ?) ',args))))))))
+
+
+;; (define-callback-definer define-super-callback :int ((a :float) (b :float)))
+
+;; (define-super-callback hey (a b)
+;;   (+ a b))

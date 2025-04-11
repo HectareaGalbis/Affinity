@@ -12,6 +12,7 @@
                 :serial t
                 :components ((:file "types")
                              (:file "slots")
+                             (:file "primitive")
                              (:file "functions")
                              (:file "pointer")
                              (:file "structure")

@@ -48,7 +48,7 @@
 
   (defun slot-expand-getter (slot)
     (with-slots (name affi-type) slot
-      (expand-getter name affi-type)))
+      (expand-getter name (parse-affi-type affi-type))))
 
   (defun slot-expand-setter (new-value slot)
     (with-slots (name affi-type) slot
