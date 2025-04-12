@@ -9,11 +9,10 @@
 
 
 
-(cffi:define-foreign-type function-type ()
-  ((name :initarg :name)))
+(cffi:define-foreign-type function-type () ())
 
-(cffi:define-parse-method function-instance (name)
-  (make-instance 'function-type :name name :actual-type :pointer))
+(cffi:define-parse-method function-instance ()
+  (make-instance 'function-type :actual-type :pointer))
 
 (defclass function-obj ()
   ((function-ref :initarg :function-ref))
@@ -25,6 +24,14 @@
       (string (cffi:foreign-symbol-pointer fref))
       (symbol (cffi:get-callback fref))
       ((satisfies cffi:pointerp) fref)))
+
+(defmethod cffi:translate-to-foreign ((object function-obj) (obj-type function-type))
+  (declare (ignore obj-type))
+  (function-ref-to-pointer (slot-value object 'function-ref)))
+
+(defmethod cffi:translate-from-foreign (ptr (obj-type function-type))
+  (declare (ignore function-type))
+  ptr)
 
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
@@ -83,7 +90,25 @@
             '(values)
             return-sym))))
 
+(defclass function-lens-type ()
+  ((ret-type :initarg :ret-type)
+   (arg-slots :initarg :arg-slots)))
 
+(define-affi-type :function (ret-type (&rest arg-slots))
+  (values
+   'function-type
+   (make-instance 'function-lens-type :ret-type ret-type :arg-slots arg-slots)))
+
+(defmethod expand-getter (slot-name (obj-type function-lens-type))
+  (with-slots (ret-type arg-slots) obj-type
+    (with-gensyms (function-instance ret-sym)
+      `(let ((,function-instance (make-instance 'function-obj :function-ref ,slot-name)))
+         (c2mop:set-funcallable-instance-function
+          ,function-instance
+          (lambda ,@(make-function-form slot-name `(,ret-sym ,ret-type) arg-slots 
+                     ,(if (equal (canonicalize-affi-type ret-type) '(:void))
+                          '(values)
+                          return-sym))))))))
 
 
 (eval-when (:compile-toplevel :load-toplevel :execute)

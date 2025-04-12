@@ -79,12 +79,12 @@
   "Defines an user type.
 
 This macro must return two objects:
-  1. The primitive object this type is based on.
+  1. The primitive type this type is based on.
   2. An object that represents the type."
   (assert (not (keywordp name)) (name) "The name of an user affi type cannot be a keyword.")
   (with-gensyms (object-type primitive-type)
     `(exp:defexpansion user-affi-types ,name ,args
-       (multiple-value-bind (,object-type ,primitive-type) (progn ,@body)
+       (multiple-value-bind (,primitive-type ,object-type) (progn ,@body)
          (assert (or (null ,primitive-type) (primitive-affi-type-p ,primitive-type))
                  "Expected a primitive type.")
          (make-instance 'user-affi-type
