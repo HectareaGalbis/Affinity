@@ -75,6 +75,22 @@
   ((primitive-affi-type :initarg :primitive-affi-type)
    (object-type :initarg :object-type)))
 
+
+(defmacro define-affi-type% (name (&rest args) &body body)
+  "Defines an user type.
+
+This macro must return two objects:
+  1. The primitive type this type is based on.
+  2. An object that represents the type."
+  (with-gensyms (object-type primitive-type)
+    `(exp:defexpansion user-affi-types ,name ,args
+       (multiple-value-bind (,primitive-type ,object-type) (progn ,@body)
+         (assert (or (null ,primitive-type) (primitive-affi-type-p ,primitive-type))
+                 (,primitive-type) "Expected a primitive type.")
+         (make-instance 'user-affi-type
+                        :primitive-affi-type ,primitive-type
+                        :object-type ,object-type)))))
+
 (defmacro define-affi-type (name (&rest args) &body body)
   "Defines an user type.
 
@@ -82,14 +98,7 @@ This macro must return two objects:
   1. The primitive type this type is based on.
   2. An object that represents the type."
   (assert (not (keywordp name)) (name) "The name of an user affi type cannot be a keyword.")
-  (with-gensyms (object-type primitive-type)
-    `(exp:defexpansion user-affi-types ,name ,args
-       (multiple-value-bind (,primitive-type ,object-type) (progn ,@body)
-         (assert (or (null ,primitive-type) (primitive-affi-type-p ,primitive-type))
-                 "Expected a primitive type.")
-         (make-instance 'user-affi-type
-                        :primitive-affi-type ,primitive-type
-                        :object-type ,object-type)))))
+  `(define-affi-type% ,name ,args ,@body))
 
 (defun user-affi-type-p (type)
   (exp:expansionp 'user-affi-types (affi-type-name type)))
@@ -110,8 +119,8 @@ This macro must return two objects:
   (check-user-affi-type type)
   (let ((primitive-affi (user-affi-to-primitive-affi type)))
     (assert primitive-affi (primitive-affi)
-            "The type ~s does not have an associated primitive type." (affi-type-to-string type)))
-  (primitive-affi-to-cffi primitive-affi))
+            "The type ~s does not have an associated primitive type." (affi-type-to-string type))
+    (primitive-affi-to-cffi primitive-affi)))
 
 ;; --------------------------------------------------------------------------------
 

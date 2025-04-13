@@ -30,7 +30,7 @@
   (function-ref-to-pointer (slot-value object 'function-ref)))
 
 (defmethod cffi:translate-from-foreign (ptr (obj-type function-type))
-  (declare (ignore function-type))
+  (declare (ignore obj-type))
   ptr)
 
 
@@ -94,7 +94,7 @@
   ((ret-type :initarg :ret-type)
    (arg-slots :initarg :arg-slots)))
 
-(define-affi-type :function (ret-type (&rest arg-slots))
+(define-affi-type% :function (ret-type (&rest arg-slots))
   (values
    'function-type
    (make-instance 'function-lens-type :ret-type ret-type :arg-slots arg-slots)))
@@ -106,9 +106,9 @@
          (c2mop:set-funcallable-instance-function
           ,function-instance
           (lambda ,@(make-function-form slot-name `(,ret-sym ,ret-type) arg-slots 
-                     ,(if (equal (canonicalize-affi-type ret-type) '(:void))
-                          '(values)
-                          return-sym))))))))
+                     (if (equal (canonicalize-affi-type ret-type) '(:void))
+                         '(values)
+                         ret-sym))))))))
 
 
 (eval-when (:compile-toplevel :load-toplevel :execute)

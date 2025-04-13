@@ -75,8 +75,8 @@ The dispatch is done by class-name.
 
 (defmethod c2mop:slot-value-using-class ((class affinity-class) object
                                          (slot affinity-effective-slot-definition))
-  (let ((private-access-symbol (slot-value object 'private-access-symbol))
-        (private-access-p (symbol-value private-access-symbol)))
+  (let* ((private-access-symbol (slot-value object 'private-access-symbol))
+         (private-access-p (symbol-value private-access-symbol)))
     (if private-access-p
         (object-foreign-slot-value object (c2mop:slot-definition-name slot))
         (if (slot-value slot 'private)
@@ -86,8 +86,8 @@ The dispatch is done by class-name.
 
 (defmethod (setf c2mop:slot-value-using-class) (new-value (class affinity-class) object
                                                 (slot affinity-effective-slot-definition))
-  (let ((private-access-symbol (slot-value object 'private-access-symbol))
-        (private-access-p (symbol-value private-access-symbol)))
+  (let* ((private-access-symbol (slot-value object 'private-access-symbol))
+         (private-access-p (symbol-value private-access-symbol)))
     (if private-access-p
         (setf (object-foreign-slot-value object (c2mop:slot-definition-name slot)) new-value)
         (if (slot-value slot 'private)
