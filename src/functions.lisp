@@ -9,10 +9,10 @@
 
 
 
-(cffi:define-foreign-type function-type () ())
+(cffi:define-foreign-type foreign-function-type () ())
 
 (cffi:define-parse-method function-instance ()
-  (make-instance 'function-type :actual-type :pointer))
+  (make-instance 'foreign-function-type :actual-type :pointer))
 
 (defclass function-obj ()
   ((function-ref :initarg :function-ref))
@@ -25,13 +25,16 @@
       (symbol (cffi:get-callback fref))
       ((satisfies cffi:pointerp) fref)))
 
-(defmethod cffi:translate-to-foreign ((object function-obj) (obj-type function-type))
+(defmethod cffi:translate-to-foreign ((object function-obj) (obj-type foreign-function-type))
   (declare (ignore obj-type))
   (function-ref-to-pointer (slot-value object 'function-ref)))
 
-(defmethod cffi:translate-from-foreign (ptr (obj-type function-type))
+(defmethod cffi:translate-from-foreign (ptr (obj-type foreign-function-type))
   (declare (ignore obj-type))
   ptr)
+
+(define-primitive-affi-type function-type ()
+  '(foreign-function-type))
 
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
@@ -44,7 +47,7 @@
   
   (defun make-foreign-funcall (function-ref foreign-slots return-slot)
     `(cffi:foreign-funcall-pointer
-      (function-ref-to-pointer ,function-ref)
+      (function-ref-to-pointer ,function-ref) ()
       ,@(mapcan #¿(list (slot-cffi-type ?slot) (slot-name ?slot)) foreign-slots)
       ,(slot-cffi-type return-slot)))
 
@@ -77,7 +80,7 @@
 (defmacro define-c-function ((name foreign-name) return-form (&rest args) &body body)
   `(progn
      (when (symbol-function ',name)
-       (warn "affi:define-c-function : Redefining %s" ',name))
+       (warn "affi:define-c-function : Redefining ~s" ',name))
      (setf (symbol-function ',name) (make-instance 'function-obj :function-ref ,foreign-name))
      (c2mop:set-funcallable-instance-function
       #',name (lambda ,@(make-function-form foreign-name return-form args body)))))
@@ -106,9 +109,13 @@
          (c2mop:set-funcallable-instance-function
           ,function-instance
           (lambda ,@(make-function-form slot-name `(,ret-sym ,ret-type) arg-slots 
-                     (if (equal (canonicalize-affi-type ret-type) '(:void))
-                         '(values)
-                         ret-sym))))))))
+                     (list (if (equal (canonicalize-affi-type ret-type) '(:void))
+                               '(values)
+                               ret-sym)))))))))
+
+(defmethod expand-setter (new-value slot-name (obj-type function-lens-type))
+  (declare (ignore obj-type))
+  `(setf ,slot-name ,new-value))
 
 
 (eval-when (:compile-toplevel :load-toplevel :execute)

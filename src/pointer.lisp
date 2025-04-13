@@ -231,5 +231,5 @@
      ,@body))
 
 
-(define-primitive-affi-type :pointer (inner-affi-type)
+(define-primitive-affi-type :pointer (&optional (inner-affi-type :void))
   `(pointer ,inner-affi-type))

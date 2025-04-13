@@ -86,7 +86,7 @@ This macro must return two objects:
     `(exp:defexpansion user-affi-types ,name ,args
        (multiple-value-bind (,primitive-type ,object-type) (progn ,@body)
          (assert (or (null ,primitive-type) (primitive-affi-type-p ,primitive-type))
-                 (,primitive-type) "Expected a primitive type.")
+                 () "Expected a primitive type but found: ~s" ,primitive-type)
          (make-instance 'user-affi-type
                         :primitive-affi-type ,primitive-type
                         :object-type ,object-type)))))
@@ -178,4 +178,5 @@ This macro must return two objects:
     (error "The method expand-setter is not implemented for the type ~s." (type-of obj-type))))
 
 (defmethod expand-setter (new-value slot-name (obj-type primitive-affi-type))
+  (declare (ignore obj-type))
   `(setf ,slot-name ,new-value))

@@ -11,6 +11,8 @@
            #:defctype
            #:defcfun
            #:define-c-function
+           #:defcallback
+           #:define-callback-definer
            #:defcstruct
            #:foreign-alloc
            #:mem-ref))
