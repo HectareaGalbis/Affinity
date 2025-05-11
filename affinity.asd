@@ -17,13 +17,17 @@
                              (:file "pointer")
                              (:file "structure")
                              (:file "string")
-                             (:file "list-array")))))
+                             (:file "list-array")
+                             (:file "list-ptr")))))
 
 
-;; (asdf:defsystem "affinity/doc"
+;; (asdf:defsystem "affinity/docs"
 ;;   :author "Hector Galbis Sanchis <hectometrocuadrado@gmail.com>"
-;;   :description "Extension of the CFFI project. A facility to wrap C bindings and write documentation."
+;;   :description "Dpcumentation of Affinity."
 ;;   :defsystem-depends-on ("adp-github")
-;;   :depends-on ("more-cffi")
-;;   :components (:module "scribble"
-;;                :components ((:scribble "README"))))
+;;   :class :adp-github
+;;   :depends-on ("affinity")
+;;   :components ((:module "scribble"
+;;                 :components ((:file "package")
+;;                              (:scribble "README")
+;;                              (:scribble "reference")))))
