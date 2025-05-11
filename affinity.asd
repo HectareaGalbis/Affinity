@@ -16,7 +16,8 @@
                              (:file "functions")
                              (:file "pointer")
                              (:file "structure")
-                             (:file "string")))))
+                             (:file "string")
+                             (:file "list-array")))))
 
 
 ;; (asdf:defsystem "affinity/doc"

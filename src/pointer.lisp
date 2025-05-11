@@ -9,12 +9,23 @@
 (cffi:define-parse-method pointer (ctype)
   (make-instance 'pointer-type :ctype ctype :actual-type :pointer))
 
-(defclass pointer ()
+(defclass pointer (owner)
   ((cpointer :initarg :cpointer)
    (ctype :initarg :ctype)
-   (subpointers :initarg :subpointers
-                :initform nil)
+   (subpointers :initform (make-pool))
    (private-access-symbol :initform (make-symbol "PRIVATE-ACCESS"))))
+
+(defmethod own-pointer ((owner pointer) ptr)
+  (with-slots (subpointers) owner
+    (own-pointer subpointers ptr)))
+
+(defmethod release-pointer ((owner pointer) ptr)
+  (with-slots (subpointers) owner
+    (release-pointer subpointers ptr)))
+
+(defmethod owns-pointer-p ((owner pointer) ptr)
+  (with-slots (subpointers) owner
+    (owns-pointer-p subpointers ptr)))
 
 (defmethod cffi:translate-to-foreign ((object pointer) (obj-type pointer-type))
   (declare (ignore obj-type))
@@ -57,7 +68,8 @@
       (let ((private-access-p (symbol-value private-access-symbol)))
         (if private-access-p
             (with-slots (cpointer ctype) obj
-              (setf (pointer-foreign-slot-value obj slot-name (cadr ctype)) new-value))
+              (let ((*owner* obj))
+                (setf (pointer-foreign-slot-value obj slot-name (cadr ctype)) new-value)))
             (if (public-slot-name-p class slot-name)
                 (progv (list private-access-symbol) '(t)
                   (setf (slot-value obj slot-name) new-value))
@@ -79,7 +91,8 @@
 
 (defun foreign-free (ptr)
   (check-type ptr pointer)
-  (with-slots (cpointer) ptr
+  (with-slots (subpointers cpointer) ptr
+    (free-pool subpointers)
     (cffi:foreign-free cpointer)))
 
 (defun foreign-alloc (ctype &key initial-element initial-contents (count 1) null-terminated-p)
@@ -91,6 +104,8 @@
          (pointer-instance (make-instance 'pointer
                                           :cpointer cpointer
                                           :ctype ctype)))
+    (when *owner*
+      (own-pointer *owner* pointer-instance))
     (values pointer-instance)))
 
 (defun foreign-symbol-pointer (foreign-name ctype &key library)
@@ -126,7 +141,8 @@
 (defun (setf mem-aref) (new-value ptr &optional (index 0))
   (check-type ptr pointer)
   (with-slots (cpointer ctype) ptr
-    (setf (cffi:mem-aref cpointer ctype index) new-value)))
+    (let ((*owner* ptr))
+      (setf (cffi:mem-aref cpointer ctype index) new-value))))
 
 (defun mem-ref (ptr &optional offset)
   (check-type ptr pointer)
@@ -136,7 +152,8 @@
 (defun (setf mem-ref) (new-value ptr &optional offset)
   (check-type ptr pointer)
   (with-slots (cpointer ctype) ptr
-    (setf (cffi:mem-ref cpointer ctype offset) new-value)))
+    (let ((*owner* ptr))
+      (setf (cffi:mem-ref cpointer ctype offset) new-value))))
 
 (defun null-pointer ()
   (make-instance 'pointer
@@ -185,16 +202,21 @@
 (defun (setf foreign-slot-value) (new-value ptr slot-name)
   (check-type ptr pointer)
   (with-slots (cpointer ctype) ptr
-    (setf (cffi:foreign-slot-value cpointer ctype slot-name) new-value)))
+    (let ((*owner* ptr))
+      (setf (cffi:foreign-slot-value cpointer ctype slot-name) new-value))))
 
 (defmacro with-foreign-object ((var ctype &optional count) &body body)
-  (with-gensyms (cvar ev-type)
+  (with-gensyms (priv-var cvar ev-type subpointers)
     `(let ((,ev-type ,ctype))
        (cffi:with-foreign-object (,cvar ,ev-type ,count)
-         (let ((,var (make-instance 'pointer
+         (let* ((,priv-var (make-instance 'pointer
                                     :cpointer ,cvar
-                                    :ctype ,ev-type)))
-           ,@body)))))
+                                    :ctype ,ev-type))
+                (,var ,priv-var))
+           (unwind-protect
+                (progn ,@body)
+             (with-slots (,subpointers subpointers) ,priv-var
+               (free-pool ,subpointers))))))))
 
 
 (eval-when (:compile-toplevel :load-toplevel :execute)

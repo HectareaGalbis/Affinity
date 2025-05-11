@@ -11,7 +11,7 @@
 
 (cffi:define-foreign-type foreign-function-type () ())
 
-(cffi:define-parse-method function-instance ()
+(cffi:define-parse-method foreign-function-type ()
   (make-instance 'foreign-function-type :actual-type :pointer))
 
 (defclass function-obj ()
