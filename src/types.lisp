@@ -5,21 +5,23 @@
 
 
 ;; Alias types
-(exp:defexpander alias-affi-types)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defvar *alias-affi-types* (exp:make-expander)))
 
 (defmacro defctype (name (&rest args) &body body)
-  `(exp:defexpansion alias-affi-types ,name ,args
-     ,@body))
+  `(eval-when (:compile-toplevel :load-toplevel :execute)
+     (exp:defexpansion *alias-affi-types* ,name ,args
+       ,@body)))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
 
   (defun affi-type-alias-p (type)
-    (exp:expansionp 'alias-affi-types (car (ensure-list type))))
+    (exp:expansionp *alias-affi-types* (car (ensure-list type))))
 
   (defun canonicalize-affi-type (type)
     (let ((list-type (ensure-list type)))
       (if (affi-type-alias-p type)
-          (ensure-list (exp:expand 'alias-affi-types list-type))
+          (ensure-list (exp:expand *alias-affi-types* list-type))
           (values list-type))))
 
   (defun affi-type-name (type)
@@ -36,20 +38,22 @@
 ;; Los tipos primitivos relacionan un tipo de affi con un tipo cffi.
 ;; Es una relacion 1 a 1. No se define ningun tipo de conversion.
 
-(exp:defexpander primitive-affi-types)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defvar *primitive-affi-types* (exp:make-expander)))
 
 (defclass primitive-affi-type ()
   ((cffi-type :initarg :cffi-type)))
 
 (defmacro define-primitive-affi-type (name (&rest args) &body body)
   (with-gensyms (args-sym)
-    `(exp:defexpansion primitive-affi-types ,name (&rest ,args-sym)
+    `(eval-when (:compile-toplevel :load-toplevel :execute)
+     (exp:defexpansion *primitive-affi-types* ,name (&rest ,args-sym)
        (let ((cffi-type (destructuring-bind ,args ,args-sym
                           ,@body)))
-         (make-instance 'primitive-affi-type :cffi-type cffi-type)))))
+         (make-instance 'primitive-affi-type :cffi-type cffi-type))))))
 
 (defun primitive-affi-type-p (type)
-  (exp:expansionp 'primitive-affi-types (affi-type-name type)))
+  (exp:expansionp *primitive-affi-types* (affi-type-name type)))
 
 (defun check-primitive-affi-type (type)
   (unless (primitive-affi-type-p type)
@@ -57,7 +61,7 @@
 
 (defun parse-primitive-affi-type (type)
   (check-primitive-affi-type type)
-  (exp:expand 'primitive-affi-types (canonicalize-affi-type type)))
+  (exp:expand *primitive-affi-types* (canonicalize-affi-type type)))
 
 (defun primitive-affi-to-cffi (type)
   (slot-value (parse-primitive-affi-type (canonicalize-affi-type type)) 'cffi-type))
@@ -69,7 +73,8 @@
 ;; El usuario debe crear una clase cualquiera que representa un tipo de dato.
 ;; Los metodos para realizar las transformaciones se deben especializar usando esta clase.
 
-(exp:defexpander user-affi-types)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defvar *user-affi-types* (exp:make-expander)))
 
 (defclass user-affi-type ()
   ((primitive-affi-type :initarg :primitive-affi-type)
@@ -83,13 +88,14 @@ This macro must return two objects:
   1. The primitive type this type is based on.
   2. An object that represents the type."
   (with-gensyms (object-type primitive-type)
-    `(exp:defexpansion user-affi-types ,name ,args
+    `(eval-when (:compile-toplevel :load-toplevel :execute)
+     (exp:defexpansion *user-affi-types* ,name ,args
        (multiple-value-bind (,primitive-type ,object-type) (progn ,@body)
          (assert (or (null ,primitive-type) (primitive-affi-type-p ,primitive-type))
                  () "Expected a primitive type but found: ~s" ,primitive-type)
          (make-instance 'user-affi-type
                         :primitive-affi-type ,primitive-type
-                        :object-type ,object-type)))))
+                        :object-type ,object-type))))))
 
 (defmacro define-affi-type (name (&rest args) &body body)
   "Defines an user type.
@@ -101,7 +107,7 @@ This macro must return two objects:
   `(define-affi-type% ,name ,args ,@body))
 
 (defun user-affi-type-p (type)
-  (exp:expansionp 'user-affi-types (affi-type-name type)))
+  (exp:expansionp *user-affi-types* (affi-type-name type)))
 
 (defun check-user-affi-type (type)
   (unless (user-affi-type-p type)
@@ -109,11 +115,11 @@ This macro must return two objects:
 
 (defun parse-user-affi-type (type)
   (check-user-affi-type type)
-  (slot-value (exp:expand 'user-affi-types (canonicalize-affi-type type)) 'object-type))
+  (slot-value (exp:expand *user-affi-types* (canonicalize-affi-type type)) 'object-type))
 
 (defun user-affi-to-primitive-affi (type)
   (check-user-affi-type type)
-  (slot-value (exp:expand 'user-affi-types (canonicalize-affi-type type)) 'primitive-affi-type))
+  (slot-value (exp:expand *user-affi-types* (canonicalize-affi-type type)) 'primitive-affi-type))
 
 (defun user-affi-to-cffi (type)
   (check-user-affi-type type)

@@ -13,15 +13,15 @@
 
 (defun free-pool (pool)
   (with-slots (pointers) pool
-    (loop for pointer being the hash-value of pointers using hash-key key
+    (loop for pointer being the hash-value of pointers using (hash-key key)
           do (foreign-free pointer)
              (remhash key pointers))))
 
 (defmethod own-pointer ((owner pool) ptr)
-  (setf (gethash (pointer-address ptr) owner) ptr))
+  (setf (gethash (pointer-address ptr) (slot-value owner 'pointers)) ptr))
 
 (defmethod release-pointer ((owner pool) ptr)
-  (remhash (pointer-address ptr) owner))
+  (remhash (pointer-address ptr) (slot-value owner 'pointers)))
 
 (defmethod owns-pointer-p ((owner pool) ptr)
-  (and (gethash (pointer-address ptr) owner) t))
+  (and (gethash (pointer-address ptr) (slot-value owner 'pointers)) t))

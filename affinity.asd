@@ -14,6 +14,8 @@
                              (:file "slots")
                              (:file "primitive")
                              (:file "functions")
+                             (:file "owner")
+                             (:file "pool")
                              (:file "pointer")
                              (:file "structure")
                              (:file "string")
